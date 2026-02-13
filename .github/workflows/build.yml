@@ -1,0 +1,77 @@
+name: Build Mod
+
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
+      - name: Build Mod
+        run: |
+          curl -o mdk.zip https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.1.0/forge-1.20.1-47.1.0-mdk.zip
+          unzip mdk.zip -d mod
+          cd mod
+          mkdir -p src/main/java/com/godblock
+          cat > src/main/java/com/godblock/GodMod.java << 'EOF'
+package com.godblock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.material.Material;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.registries.DeferredRegister;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.RegistryObject;
+
+@Mod(GodMod.MOD_ID)
+public class GodMod {
+    public static final String MOD_ID = "godblock";
+    public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create(ForgeRegistries.BLOCKS, MOD_ID);
+    public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
+    
+    public static final RegistryObject<Block> GOD_BLOCK = BLOCKS.register("god_block",
+        () -> new Block(BlockBehaviour.Properties.of(Material.METAL).strength(50f).lightLevel(s -> 15).requiresCorrectToolForDrops())
+    );
+    
+    public static final RegistryObject<Item> GOD_BLOCK_ITEM = ITEMS.register("god_block",
+        () -> new BlockItem(GOD_BLOCK.get(), new Item.Properties())
+    );
+    
+    public GodMod() {
+        IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
+        BLOCKS.register(bus);
+        ITEMS.register(bus);
+        MinecraftForge.EVENT_BUS.register(this);
+    }
+}
+EOF
+          mkdir -p src/main/resources/META-INF
+          cat > src/main/resources/META-INF/mods.toml << 'EOF'
+modLoader="javafml"
+loaderVersion="[47,)"
+[[mods]]
+modId="godblock"
+version="1.0.0"
+displayName="God Block"
+authors="You"
+description='''
+God Block - shines and very strong!
+'''
+EOF
+          chmod +x gradlew
+          ./gradlew build
+      - name: Upload
+        uses: actions/upload-artifact@v3
+        with:
+          name: God-Block-Mod
+          path: mod/build/libs/*.jar
