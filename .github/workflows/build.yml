@@ -1,0 +1,61 @@
+name: God Block Mod
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+      - name: Build
+        run: |
+          wget -O template.zip https://github.com/FabricMC/fabric-example-mod/archive/1.21.zip
+          unzip template.zip
+          cd fabric-example-mod-1.21
+          rm -rf src
+          mkdir -p src/main/java/com/godblock
+          
+          # GodMod.java
+          cat > src/main/java/com/godblock/GodMod.java << EOF
+package com.godblock;
+import net.fabricmc.api.ModInitializer;
+import net.minecraft.util.Identifier;
+import net.minecraft.registry.Registries;
+import net.minecraft.registry.Registry;
+import net.minecraft.block.*;
+import net.minecraft.item.*;
+
+public class GodMod implements ModInitializer {
+    public void onInitialize() {
+        Block block = new Block(AbstractBlock.Settings.copy(Blocks.GOLD_BLOCK).luminance(s->15));
+        Registry.register(Registries.BLOCK, Identifier.of("godblock", "god_block"), block);
+        Registry.register(Registries.ITEM, Identifier.of("godblock", "god_block"), 
+            new BlockItem(block, new Item.Settings()));
+    }
+}
+EOF
+
+          # fabric.mod.json
+          cat > src/main/resources/fabric.mod.json << EOF
+{
+  "schemaVersion": 1,
+  "id": "godblock",
+  "version": "1.0.0",
+  "name": "God Block",
+  "entrypoints": {"main": ["com.godblock.GodMod"]},
+  "depends": {"minecraft": ">=1.21"}
+}
+EOF
+
+          chmod +x gradlew
+          ./gradlew build
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: god-block-mod
+          path: fabric-example-mod-1.21/build/libs/*.jar
