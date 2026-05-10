@@ -1,4 +1,4 @@
-name: Enjoer_7.2_Rajawali_Fixed
+name: Enjoer_7.2_Rajawali_Final_Fix
 on: [push, workflow_dispatch]
 
 jobs:
@@ -23,7 +23,6 @@ jobs:
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
-          # Очистка старых файлов, если они были
           rm -f app/src/main/java/com/enjoer/game/*
 
           echo "android.useAndroidX=true" > gradle.properties
@@ -35,7 +34,6 @@ jobs:
           <resources><style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar"><item name="android:windowFullscreen">true</item></style></resources>
           EOF
           
-          # Создаем базовые ресурсы для кнопок и джойстика
           cat > app/src/main/res/drawable/btn_blue.xml << 'EOF'
           <shape xmlns:android="http://schemas.android.com/apk/res/android"><corners android:radius="12dp"/><solid android:color="#101820"/><stroke android:width="2dp" android:color="#00BFFF"/></shape>
           EOF
@@ -46,7 +44,7 @@ jobs:
           <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval"><solid android:color="#00BFFF"/></shape>
           EOF
 
-      - name: Create Full Layout (with all IDs)
+      - name: Create Layout
         run: |
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -60,14 +58,12 @@ jobs:
                   android:layout_width="match_parent" 
                   android:layout_height="match_parent"/>
               
-              <!-- Игровой интерфейс (HUD) -->
               <RelativeLayout 
                   android:id="@+id/game_ui"
                   android:layout_width="match_parent"
                   android:layout_height="match_parent"
                   android:visibility="gone">
                   
-                  <!-- Джойстик (ID из вашей ошибки) -->
                   <FrameLayout android:id="@+id/joy_base" android:layout_width="120dp" android:layout_height="120dp" 
                       android:layout_alignParentBottom="true" android:layout_alignParentLeft="true" 
                       android:layout_margin="30dp" android:background="@drawable/joy_base">
@@ -75,7 +71,6 @@ jobs:
                           android:layout_gravity="center" android:background="@drawable/joy_stick"/>
                   </FrameLayout>
 
-                  <!-- Второй джойстик для Engine Mode -->
                   <FrameLayout android:id="@+id/engine_joy_base" android:layout_width="120dp" android:layout_height="120dp" 
                       android:layout_alignParentBottom="true" android:layout_alignParentRight="true" 
                       android:layout_margin="30dp" android:background="@drawable/joy_base">
@@ -83,7 +78,6 @@ jobs:
                           android:layout_gravity="center" android:background="@drawable/joy_stick"/>
                   </FrameLayout>
 
-                  <!-- Цветовые кнопки (ID из вашей ошибки) -->
                   <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
                       android:layout_centerHorizontal="true" android:layout_alignParentTop="true">
                       <Button android:id="@+id/color_red" android:layout_width="40dp" android:layout_height="40dp" android:background="#FF0000" android:layout_margin="2dp"/>
@@ -95,15 +89,12 @@ jobs:
                   </LinearLayout>
               </RelativeLayout>
 
-              <!-- Главное меню -->
               <LinearLayout 
                   android:id="@+id/menu_ui" 
                   android:layout_width="match_parent" 
                   android:layout_height="match_parent" 
                   android:orientation="vertical" 
-                  android:gravity="center" 
-                  android:background="#02050A">
-                  
+                  android:gravity="center">
                   <TextView android:text="Enjoer 7.2" android:textSize="40sp" android:textColor="#00BFFF" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
                   <Button android:id="@+id/btn_play" android:layout_width="200dp" android:layout_height="60dp" android:text="Play" android:background="@drawable/btn_blue" android:layout_marginTop="20dp" android:textColor="#00BFFF"/>
                   <Button android:id="@+id/btn_engine" android:layout_width="200dp" android:layout_height="60dp" android:text="Editor" android:background="@drawable/btn_blue" android:layout_marginTop="10dp" android:textColor="#00BFFF"/>
@@ -111,13 +102,12 @@ jobs:
           </FrameLayout>
           EOF
 
-      - name: Create Java Classes
+      - name: Create Fixed Java Classes
         run: |
           cat > app/src/main/java/com/enjoer/game/MainActivity.java << 'EOF'
           package com.enjoer.game;
           import android.os.Bundle;
           import android.view.View;
-          import android.widget.Button;
           import androidx.appcompat.app.AppCompatActivity;
           import org.rajawali3d.view.SurfaceView;
 
@@ -137,7 +127,6 @@ jobs:
                   menuUI = findViewById(R.id.menu_ui);
                   gameUI = findViewById(R.id.game_ui);
 
-                  // Обработчики кнопок, чтобы избежать ошибок компиляции
                   findViewById(R.id.btn_play).setOnClickListener(v -> {
                       menuUI.setVisibility(View.GONE);
                       gameUI.setVisibility(View.VISIBLE);
@@ -147,11 +136,6 @@ jobs:
                       menuUI.setVisibility(View.GONE);
                       gameUI.setVisibility(View.VISIBLE);
                   });
-
-                  // Инициализация джойстиков и кнопок цвета (просто для проверки наличия ID)
-                  View jb = findViewById(R.id.joy_base);
-                  View js = findViewById(R.id.joy_stick);
-                  View cr = findViewById(R.id.color_red);
               }
           }
           EOF
@@ -159,6 +143,7 @@ jobs:
           cat > app/src/main/java/com/enjoer/game/GameRenderer.java << 'EOF'
           package com.enjoer.game;
           import android.content.Context;
+          import android.view.MotionEvent;
           import org.rajawali3d.renderer.Renderer;
           import org.rajawali3d.view.SurfaceView;
           import org.rajawali3d.materials.Material;
@@ -168,17 +153,28 @@ jobs:
               public GameRenderer(Context context, SurfaceView surfaceView) {
                   super(context);
               }
+
               @Override
               protected void initScene() {
                   getCurrentScene().setBackgroundColor(0, 0, 0.1f, 1);
                   Cube cube = new Cube(1);
-                  Material m = new Material();
-                  cube.setMaterial(m);
+                  cube.setMaterial(new Material());
                   getCurrentScene().addChild(cube);
               }
+
               @Override
               public void onRender(long elapsedTime, double deltaTime) {
                   super.onRender(elapsedTime, deltaTime);
+              }
+
+              @Override
+              public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep, int xPixelOffset, int yPixelOffset) {
+                  // Метод необходим для интерфейса ISurfaceRenderer
+              }
+
+              @Override
+              public void onTouchEvent(MotionEvent event) {
+                  // Метод необходим для интерфейса ISurfaceRenderer
               }
           }
           EOF
@@ -234,7 +230,6 @@ jobs:
 
       - name: Build APK
         run: |
-          chmod +x gradlew || true
           wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
           unzip -q gradle-8.5-bin.zip
           export PATH="$PWD/gradle-8.5/bin:$PATH"
@@ -244,5 +239,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Enjoer_7.2_Fixed
+          name: Enjoer_7.2_Fixed_APK
           path: app/build/outputs/apk/debug/app-debug.apk
