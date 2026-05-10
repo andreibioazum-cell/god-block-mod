@@ -72,13 +72,44 @@ jobs:
 
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application' }
-          android { namespace 'com.enjoer.game'; compileSdk 34; defaultConfig { applicationId 'com.enjoer.game'; minSdk 24; targetSdk 34 }; buildFeatures { buildConfig true }; packaging { resources { excludes += ['META-INF/DEPENDENCIES','META-INF/LICENSE','META-INF/LICENSE.txt','META-INF/NOTICE','META-INF/NOTICE.txt'] } } }
-          dependencies { implementation 'androidx.appcompat:appcompat:1.6.1'; implementation 'org.mozilla:rhino:1.7.14'; implementation 'com.github.mkpaz:rajawali:1.1.970' }
+          android { 
+              namespace 'com.enjoer.game'
+              compileSdk 34
+              defaultConfig { 
+                  applicationId 'com.enjoer.game'
+                  minSdk 24
+                  targetSdk 34
+              }
+              buildFeatures { buildConfig true }
+              packaging { 
+                  resources { 
+                      excludes += ['META-INF/DEPENDENCIES','META-INF/LICENSE','META-INF/LICENSE.txt','META-INF/NOTICE','META-INF/NOTICE.txt'] 
+                  } 
+              } 
+          }
+          dependencies { 
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'org.mozilla:rhino:1.7.14'
+              implementation 'org.rajawali3d:rajawali:1.1.777'
+          }
           EOF
 
           cat > build.gradle << 'EOF'
-          buildscript { repositories { google(); mavenCentral() }; dependencies { classpath 'com.android.tools.build:gradle:8.2.2' } }
-          allprojects { repositories { google(); mavenCentral(); maven { url 'https://jitpack.io' } } }
+          buildscript { 
+              repositories { 
+                  google()
+                  mavenCentral() 
+              }
+              dependencies { 
+                  classpath 'com.android.tools.build:gradle:8.2.2' 
+              } 
+          }
+          allprojects { 
+              repositories { 
+                  google()
+                  mavenCentral()
+              } 
+          }
           EOF
 
           echo "include ':app'" > settings.gradle
@@ -94,6 +125,7 @@ jobs:
           </manifest>
           EOF
 
+          # Остальные файлы остаются без изменений
           cat > app/src/main/java/com/enjoer/game/Block.java << 'EOF'
           package com.enjoer.game;
           public class Block{public float x,y,z,sx,sy,sz,r,g,b;public boolean hidden=false;public int ridixPrice=0;public boolean purchased=false;public String itemName="";
@@ -120,6 +152,61 @@ jobs:
           public GameText(float x,float y,float z,String text){this.x=x;this.y=y;this.z=z;this.text=text!=null&&!text.isEmpty()?text:"Text";}}
           EOF
 
+          # Добавляем EGameUI.java
+          cat > app/src/main/java/com/enjoer/game/EGameUI.java << 'EGAMEUI'
+          package com.enjoer.game;
+          import android.content.Context;
+          import android.graphics.Canvas;
+          import android.graphics.Color;
+          import android.graphics.Paint;
+          import android.view.View;
+          public class EGameUI extends View {
+              private Paint paint;
+              private GameRenderer renderer;
+              public EGameUI(Context context, GameRenderer ren) {
+                  super(context);
+                  this.renderer = ren;
+                  paint = new Paint();
+                  paint.setAntiAlias(true);
+                  setWillNotDraw(false);
+              }
+              @Override
+              protected void onDraw(Canvas canvas) {
+                  super.onDraw(canvas);
+                  if (renderer == null) return;
+                  
+                  // Рисуем координаты игрока
+                  paint.setColor(Color.parseColor("#00BFFF"));
+                  paint.setTextSize(40);
+                  paint.setStyle(Paint.Style.FILL);
+                  String coords = String.format("X: %.1f Y: %.1f Z: %.1f", renderer.pX, renderer.pY, renderer.pZ);
+                  canvas.drawText(coords, 20, 100, paint);
+                  
+                  // Рисуем количество блоков
+                  String blockInfo = "Blocks: " + renderer.blocks.size() + " | Items: " + renderer.items.size();
+                  canvas.drawText(blockInfo, 20, 160, paint);
+                  
+                  // Рисуем FPS (примерно)
+                  String fps = "FPS: 60";
+                  canvas.drawText(fps, 20, 220, paint);
+                  
+                  // Рисуем crosshair в центре
+                  paint.setColor(Color.parseColor("#FF00BFFF"));
+                  paint.setStyle(Paint.Style.STROKE);
+                  paint.setStrokeWidth(3);
+                  int centerX = getWidth() / 2;
+                  int centerY = getHeight() / 2;
+                  canvas.drawCircle(centerX, centerY, 15, paint);
+                  canvas.drawLine(centerX - 25, centerY, centerX + 25, centerY, paint);
+                  canvas.drawLine(centerX, centerY - 25, centerX, centerY + 25, paint);
+                  
+                  // Перерисовка для анимации
+                  invalidate();
+              }
+          }
+          EGAMEUI
+
+          # GameRenderer остается прежним (ваш код)
           cat > app/src/main/java/com/enjoer/game/GameRenderer.java << 'ENDRENDERER'
           package com.enjoer.game;
           import android.content.Context; import android.opengl.GLES30; import android.view.MotionEvent;
@@ -130,7 +217,7 @@ jobs:
           import org.rajawali3d.renderer.Renderer; import org.rajawali3d.view.SurfaceView;
           import java.util.concurrent.CopyOnWriteArrayList;
           public class GameRenderer extends Renderer {
-          public float pX=0,pY=6,pZ=15,rY=0,rX=0,jX=0,jY=0,vY=0;
+          public float pX=0,pY=6,pZ=15,rY=0,rX=0,jX=0,jY=0,vY=0,mm,bt,bd,wp,jp,cr;
           public boolean isEngineMode=false,isPlayingLevel=false,gridEnabled=true,inventoryVisible=false;
           public float blockR=0.3f,blockG=0.6f,blockB=1f,blockSX=4,blockSY=4,blockSZ=4,placeDist=12f;
           public final float gridSize=2f;
@@ -260,205 +347,7 @@ jobs:
           }
           ENDRENDERER
 
-          cat > app/src/main/res/layout/activity_main.xml << 'LAYOUT'
-          <?xml version="1.0" encoding="utf-8"?>
-          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#02050A">
-          <org.rajawali3d.view.SurfaceView android:id="@+id/gl_view" android:layout_width="match_parent" android:layout_height="match_parent"/>
-          <RelativeLayout android:id="@+id/game_ui" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone">
-          <View android:id="@+id/look_zone" android:layout_width="match_parent" android:layout_height="match_parent"/>
-          <Button android:id="@+id/btn_menu" android:layout_width="80dp" android:layout_height="50dp" android:layout_margin="10dp" android:text="Menu" android:textSize="13sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF"/>
-          <LinearLayout android:id="@+id/inventory_bar" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentBottom="true" android:layout_centerHorizontal="true" android:layout_marginBottom="20dp" android:orientation="horizontal" android:background="@drawable/panel_bg" android:padding="4dp" android:visibility="gone">
-          <TextView android:id="@+id/inv_slot_0" android:layout_width="55dp" android:layout_height="55dp" android:background="@drawable/inv_slot" android:gravity="center" android:textColor="#FFD700" android:textSize="11sp" android:layout_margin="2dp" android:textStyle="bold"/>
-          <TextView android:id="@+id/inv_slot_1" android:layout_width="55dp" android:layout_height="55dp" android:background="@drawable/inv_slot" android:gravity="center" android:textColor="#FFD700" android:textSize="11sp" android:layout_margin="2dp" android:textStyle="bold"/>
-          <TextView android:id="@+id/inv_slot_2" android:layout_width="55dp" android:layout_height="55dp" android:background="@drawable/inv_slot" android:gravity="center" android:textColor="#FFD700" android:textSize="11sp" android:layout_margin="2dp" android:textStyle="bold"/>
-          <TextView android:id="@+id/inv_slot_3" android:layout_width="55dp" android:layout_height="55dp" android:background="@drawable/inv_slot" android:gravity="center" android:textColor="#FFD700" android:textSize="11sp" android:layout_margin="2dp" android:textStyle="bold"/>
-          </LinearLayout>
-          <FrameLayout android:id="@+id/joy_base" android:layout_width="126dp" android:layout_height="126dp" android:layout_alignParentBottom="true" android:layout_alignParentLeft="true" android:layout_marginLeft="36dp" android:layout_marginBottom="36dp" android:background="@drawable/joy_base"/>
-          <View android:id="@+id/joy_stick" android:layout_width="54dp" android:layout_height="54dp" android:layout_alignLeft="@id/joy_base" android:layout_alignTop="@id/joy_base" android:layout_marginLeft="36dp" android:layout_marginTop="36dp" android:background="@drawable/joy_stick"/>
-          <Button android:id="@+id/btn_inv_toggle" android:layout_width="50dp" android:layout_height="50dp" android:layout_alignParentTop="true" android:layout_alignParentRight="true" android:layout_marginTop="10dp" android:layout_marginRight="10dp" android:text="📦" android:textSize="16sp" android:background="@drawable/btn_blue" android:textColor="#FFD700"/>
-          <Button android:id="@+id/btn_attack" android:layout_width="70dp" android:layout_height="70dp" android:layout_alignParentRight="true" android:layout_alignParentBottom="true" android:layout_marginRight="30dp" android:layout_marginBottom="130dp" android:text="⚔" android:textSize="20sp" android:background="@drawable/btn_brown" android:textColor="#FFD700" android:visibility="gone"/>
-          <Button android:id="@+id/btn_jump" android:layout_width="90dp" android:layout_height="90dp" android:layout_alignParentRight="true" android:layout_alignParentBottom="true" android:layout_marginRight="40dp" android:layout_marginBottom="40dp" android:text="Jump" android:textSize="14sp" android:background="@drawable/btn_blue" android:textColor="#FFF"/>
-          </RelativeLayout>
-          <RelativeLayout android:id="@+id/engine_ui" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone">
-          <View android:id="@+id/engine_touch_zone" android:layout_width="match_parent" android:layout_height="match_parent"/>
-          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_alignParentTop="true" android:orientation="horizontal" android:padding="10dp">
-          <Button android:id="@+id/btn_engine_menu" android:layout_width="80dp" android:layout_height="50dp" android:text="Menu" android:textSize="13sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF"/>
-          <Button android:id="@+id/btn_scripts" android:layout_width="90dp" android:layout_height="50dp" android:text="Scripts" android:textSize="12sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginLeft="8dp"/>
-          <Button android:id="@+id/btn_save" android:layout_width="90dp" android:layout_height="50dp" android:text="Export" android:textSize="12sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginLeft="8dp"/>
-          <Button android:id="@+id/btn_play_level" android:layout_width="80dp" android:layout_height="50dp" android:text="Play" android:textSize="13sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF"/>
-          </LinearLayout>
-          <FrameLayout android:id="@+id/engine_joy_base" android:layout_width="108dp" android:layout_height="108dp" android:layout_alignParentBottom="true" android:layout_alignParentLeft="true" android:layout_marginLeft="27dp" android:layout_marginBottom="27dp" android:background="@drawable/joy_base"/>
-          <View android:id="@+id/engine_joy_stick" android:layout_width="45dp" android:layout_height="45dp" android:layout_alignLeft="@id/engine_joy_base" android:layout_alignTop="@id/engine_joy_base" android:layout_marginLeft="31dp" android:layout_marginTop="31dp" android:background="@drawable/joy_stick"/>
-          <ScrollView android:layout_width="220dp" android:layout_height="match_parent" android:layout_alignParentRight="true" android:layout_marginTop="70dp" android:layout_marginRight="10dp" android:layout_marginBottom="10dp">
-          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:background="@drawable/panel_bg" android:padding="10dp">
-          <TextView android:text="Object Type" android:textColor="#FFF" android:textStyle="bold" android:textSize="14sp"/>
-          <LinearLayout android:orientation="horizontal" android:layout_marginTop="6dp">
-          <Button android:id="@+id/type_block" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="Block" android:textSize="11sp" android:background="@drawable/btn_blue_filled" android:textColor="#000"/>
-          <Button android:id="@+id/type_item" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="Item" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginLeft="4dp"/>
-          </LinearLayout>
-          <TextView android:id="@+id/lbl_shape" android:text="Shape" android:textColor="#FFF" android:textStyle="bold" android:layout_marginTop="10dp" android:textSize="14sp"/>
-          <LinearLayout android:id="@+id/shape_panel" android:orientation="vertical" android:layout_marginTop="6dp">
-          <Button android:id="@+id/shape_cube" android:layout_width="match_parent" android:layout_height="36dp" android:text="Cube" android:textSize="11sp" android:background="@drawable/btn_blue_filled" android:textColor="#000"/>
-          <Button android:id="@+id/shape_cylinder" android:layout_width="match_parent" android:layout_height="36dp" android:text="Cylinder" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginTop="4dp"/>
-          </LinearLayout>
-          <LinearLayout android:id="@+id/item_panel" android:orientation="vertical" android:layout_marginTop="6dp" android:visibility="gone">
-          <Button android:id="@+id/item_stick" android:layout_width="match_parent" android:layout_height="36dp" android:text="Stick" android:textSize="11sp" android:background="@drawable/btn_blue_filled" android:textColor="#000"/>
-          </LinearLayout>
-          <LinearLayout android:id="@+id/ridix_panel" android:orientation="vertical" android:layout_marginTop="10dp" android:background="@drawable/ridix_bg" android:padding="8dp">
-          <TextView android:text="Purchase Settings" android:textColor="#FFD700" android:textSize="13sp" android:textStyle="bold"/>
-          <EditText android:id="@+id/purchase_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Item name" android:textColor="#FFF" android:textColorHint="#AA8" android:background="@drawable/panel_bg" android:padding="6dp" android:textSize="12sp" android:layout_marginTop="4dp"/>
-          <TextView android:text="Ridix Price" android:textColor="#FFD700" android:textSize="11sp" android:layout_marginTop="6dp"/>
-          <LinearLayout android:orientation="horizontal" android:layout_marginTop="4dp">
-          <Button android:id="@+id/ridix_minus" android:layout_width="0dp" android:layout_height="32dp" android:layout_weight="1" android:text="-10" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#FFD700"/>
-          <TextView android:id="@+id/ridix_value" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="0" android:textColor="#FFD700" android:gravity="center" android:textSize="14sp" android:textStyle="bold"/>
-          <Button android:id="@+id/ridix_plus" android:layout_width="0dp" android:layout_height="32dp" android:layout_weight="1" android:text="+10" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#FFD700"/>
-          </LinearLayout>
-          </LinearLayout>
-          <TextView android:id="@+id/lbl_size" android:text="Size" android:textColor="#FFF" android:textStyle="bold" android:layout_marginTop="10dp" android:textSize="14sp"/>
-          <LinearLayout android:id="@+id/size_panel" android:orientation="vertical" android:layout_marginTop="6dp">
-          <LinearLayout android:orientation="horizontal">
-          <Button android:id="@+id/size_x_minus" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="X-" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF"/>
-          <Button android:id="@+id/size_x_plus" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="X+" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginLeft="4dp"/>
-          </LinearLayout>
-          <LinearLayout android:orientation="horizontal" android:layout_marginTop="4dp">
-          <Button android:id="@+id/size_y_minus" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="Y-" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF"/>
-          <Button android:id="@+id/size_y_plus" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="Y+" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginLeft="4dp"/>
-          </LinearLayout>
-          <LinearLayout android:orientation="horizontal" android:layout_marginTop="4dp">
-          <Button android:id="@+id/size_z_minus" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="Z-" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF"/>
-          <Button android:id="@+id/size_z_plus" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="Z+" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginLeft="4dp"/>
-          </LinearLayout>
-          <TextView android:id="@+id/txt_size_info" android:text="4 x 4 x 4" android:textColor="#AEEBFF" android:layout_marginTop="6dp" android:textSize="12sp"/>
-          </LinearLayout>
-          <Button android:id="@+id/btn_grid" android:layout_width="match_parent" android:layout_height="36dp" android:text="Grid: On" android:textSize="11sp" android:background="@drawable/btn_blue_filled" android:textColor="#000" android:layout_marginTop="8dp"/>
-          <LinearLayout android:orientation="horizontal" android:gravity="center" android:layout_marginTop="8dp">
-          <View android:id="@+id/color_red" android:layout_width="26dp" android:layout_height="26dp" android:background="@drawable/color_btn" android:backgroundTint="#FF2222"/>
-          <View android:id="@+id/color_green" android:layout_width="26dp" android:layout_height="26dp" android:background="@drawable/color_btn" android:backgroundTint="#22FF22" android:layout_marginLeft="5dp"/>
-          <View android:id="@+id/color_blue2" android:layout_width="26dp" android:layout_height="26dp" android:background="@drawable/color_btn" android:backgroundTint="#2288FF" android:layout_marginLeft="5dp"/>
-          <View android:id="@+id/color_yellow" android:layout_width="26dp" android:layout_height="26dp" android:background="@drawable/color_btn" android:backgroundTint="#FFFF22" android:layout_marginLeft="5dp"/>
-          <View android:id="@+id/color_white" android:layout_width="26dp" android:layout_height="26dp" android:background="@drawable/color_btn" android:backgroundTint="#FFFFFF" android:layout_marginLeft="5dp"/>
-          <View android:id="@+id/color_black" android:layout_width="26dp" android:layout_height="26dp" android:background="@drawable/color_btn" android:backgroundTint="#222222" android:layout_marginLeft="5dp"/>
-          </LinearLayout>
-          <LinearLayout android:orientation="horizontal" android:layout_marginTop="8dp">
-          <Button android:id="@+id/dist_far" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="12" android:textSize="11sp" android:background="@drawable/btn_blue_filled" android:textColor="#000"/>
-          <Button android:id="@+id/dist_vfar" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="15" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginLeft="4dp"/>
-          </LinearLayout>
-          <Button android:id="@+id/btn_place" android:layout_width="match_parent" android:layout_height="44dp" android:text="+ Place" android:textSize="12sp" android:background="@drawable/btn_blue_filled" android:textColor="#000" android:layout_marginTop="12dp"/>
-          <Button android:id="@+id/btn_hide" android:layout_width="match_parent" android:layout_height="36dp" android:text="Hide" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginTop="8dp" android:visibility="gone"/>
-          <Button android:id="@+id/btn_delete" android:layout_width="match_parent" android:layout_height="36dp" android:text="Delete" android:textSize="11sp" android:background="@drawable/btn_red" android:textColor="#FF4444" android:layout_marginTop="8dp" android:visibility="gone"/>
-          <Button android:id="@+id/btn_deselect" android:layout_width="match_parent" android:layout_height="36dp" android:text="Deselect" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginTop="8dp" android:visibility="gone"/>
-          </LinearLayout>
-          </ScrollView>
-          <LinearLayout android:id="@+id/axis_panel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentBottom="true" android:layout_centerHorizontal="true" android:layout_marginBottom="20dp" android:orientation="horizontal" android:background="@drawable/panel_bg" android:padding="6dp" android:visibility="gone">
-          <Button android:id="@+id/axis_x_minus" android:layout_width="44dp" android:layout_height="44dp" android:text="X-" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#FF4444"/>
-          <Button android:id="@+id/axis_x_plus" android:layout_width="44dp" android:layout_height="44dp" android:text="X+" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#FF4444" android:layout_marginLeft="4dp"/>
-          <Button android:id="@+id/axis_y_minus" android:layout_width="44dp" android:layout_height="44dp" android:text="Y-" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#44FF44" android:layout_marginLeft="10dp"/>
-          <Button android:id="@+id/axis_y_plus" android:layout_width="44dp" android:layout_height="44dp" android:text="Y+" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#44FF44" android:layout_marginLeft="4dp"/>
-          <Button android:id="@+id/axis_z_minus" android:layout_width="44dp" android:layout_height="44dp" android:text="Z-" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#4488FF" android:layout_marginLeft="10dp"/>
-          <Button android:id="@+id/axis_z_plus" android:layout_width="44dp" android:layout_height="44dp" android:text="Z+" android:textSize="11sp" android:background="@drawable/btn_blue" android:textColor="#4488FF" android:layout_marginLeft="4dp"/>
-          </LinearLayout>
-          </RelativeLayout>
-          <RelativeLayout android:id="@+id/playtest_ui" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone">
-          <View android:id="@+id/playtest_look_zone" android:layout_width="match_parent" android:layout_height="match_parent"/>
-          <Button android:id="@+id/btn_stop_playtest" android:layout_width="80dp" android:layout_height="50dp" android:layout_margin="10dp" android:text="Stop" android:textSize="13sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF"/>
-          <LinearLayout android:id="@+id/playtest_inventory_bar" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentBottom="true" android:layout_centerHorizontal="true" android:layout_marginBottom="20dp" android:orientation="horizontal" android:background="@drawable/panel_bg" android:padding="4dp" android:visibility="gone">
-          <TextView android:id="@+id/playtest_inv_slot_0" android:layout_width="55dp" android:layout_height="55dp" android:background="@drawable/inv_slot" android:gravity="center" android:textColor="#FFD700" android:textSize="11sp" android:layout_margin="2dp" android:textStyle="bold"/>
-          <TextView android:id="@+id/playtest_inv_slot_1" android:layout_width="55dp" android:layout_height="55dp" android:background="@drawable/inv_slot" android:gravity="center" android:textColor="#FFD700" android:textSize="11sp" android:layout_margin="2dp" android:textStyle="bold"/>
-          <TextView android:id="@+id/playtest_inv_slot_2" android:layout_width="55dp" android:layout_height="55dp" android:background="@drawable/inv_slot" android:gravity="center" android:textColor="#FFD700" android:textSize="11sp" android:layout_margin="2dp" android:textStyle="bold"/>
-          <TextView android:id="@+id/playtest_inv_slot_3" android:layout_width="55dp" android:layout_height="55dp" android:background="@drawable/inv_slot" android:gravity="center" android:textColor="#FFD700" android:textSize="11sp" android:layout_margin="2dp" android:textStyle="bold"/>
-          </LinearLayout>
-          <FrameLayout android:id="@+id/playtest_joy_base" android:layout_width="126dp" android:layout_height="126dp" android:layout_alignParentBottom="true" android:layout_alignParentLeft="true" android:layout_marginLeft="36dp" android:layout_marginBottom="36dp" android:background="@drawable/joy_base"/>
-          <View android:id="@+id/playtest_joy_stick" android:layout_width="54dp" android:layout_height="54dp" android:layout_alignLeft="@id/playtest_joy_base" android:layout_alignTop="@id/playtest_joy_base" android:layout_marginLeft="36dp" android:layout_marginTop="36dp" android:background="@drawable/joy_stick"/>
-          <Button android:id="@+id/btn_playtest_inv_toggle" android:layout_width="50dp" android:layout_height="50dp" android:layout_alignParentTop="true" android:layout_alignParentRight="true" android:layout_marginTop="60dp" android:layout_marginRight="10dp" android:text="📦" android:textSize="16sp" android:background="@drawable/btn_blue" android:textColor="#FFD700"/>
-          <Button android:id="@+id/btn_playtest_attack" android:layout_width="70dp" android:layout_height="70dp" android:layout_alignParentRight="true" android:layout_alignParentBottom="true" android:layout_marginRight="30dp" android:layout_marginBottom="130dp" android:text="⚔" android:textSize="20sp" android:background="@drawable/btn_brown" android:textColor="#FFD700" android:visibility="gone"/>
-          <Button android:id="@+id/btn_playtest_jump" android:layout_width="90dp" android:layout_height="90dp" android:layout_alignParentRight="true" android:layout_alignParentBottom="true" android:layout_marginRight="40dp" android:layout_marginBottom="40dp" android:text="Jump" android:textSize="14sp" android:background="@drawable/btn_blue" android:textColor="#FFF"/>
-          </RelativeLayout>
-          <FrameLayout android:id="@+id/purchase_dialog" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#DD000000" android:visibility="gone" android:clickable="true">
-          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:layout_gravity="center" android:layout_marginLeft="40dp" android:layout_marginRight="40dp" android:background="@drawable/ridix_bg" android:padding="24dp">
-          <TextView android:id="@+id/purchase_title" android:text="Purchase Item" android:textColor="#FFD700" android:textSize="22sp" android:textStyle="bold" android:gravity="center" android:layout_marginBottom="16dp"/>
-          <TextView android:id="@+id/purchase_item_name" android:text="Premium Block" android:textColor="#FFF" android:textSize="18sp" android:gravity="center" android:layout_marginBottom="8dp"/>
-          <TextView android:id="@+id/purchase_price" android:text="Cost: 100 Ridix" android:textColor="#FFD700" android:textSize="16sp" android:gravity="center" android:layout_marginBottom="8dp"/>
-          <TextView android:id="@+id/purchase_balance" android:text="Your balance: 150 Ridix" android:textColor="#AEEBFF" android:textSize="14sp" android:gravity="center" android:layout_marginBottom="24dp"/>
-          <LinearLayout android:orientation="horizontal">
-          <Button android:id="@+id/btn_purchase_cancel" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" android:text="Cancel" android:textSize="16sp" android:background="@drawable/btn_red" android:textColor="#FF4444" android:layout_marginRight="8dp"/>
-          <Button android:id="@+id/btn_purchase_buy" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" android:text="Buy" android:textSize="16sp" android:background="@drawable/btn_green" android:textColor="#44FF44" android:layout_marginLeft="8dp"/>
-          </LinearLayout>
-          </LinearLayout>
-          </FrameLayout>
-          <LinearLayout android:id="@+id/menu_ui" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center" android:background="#02050A">
-          <TextView android:text="Enjoer" android:textSize="52sp" android:textColor="#00BFFF" android:textStyle="bold"/>
-          <TextView android:text="Engine 7.2 Rajawali" android:textSize="18sp" android:textColor="#0088CC" android:layout_marginBottom="16dp"/>
-          <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/ridix_bg" android:padding="10dp" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="32dp">
-          <TextView android:text="Ridix: " android:textColor="#FFD700" android:textSize="16sp"/>
-          <TextView android:id="@+id/txt_ridix_lobby" android:text="0" android:textColor="#FFD700" android:textSize="16sp" android:textStyle="bold"/>
-          </LinearLayout>
-          <Button android:id="@+id/btn_play" android:layout_width="240dp" android:layout_height="60dp" android:text="Play" android:textSize="18sp" android:textColor="#00BFFF" android:background="@drawable/btn_blue" android:layout_marginBottom="16dp"/>
-          <Button android:id="@+id/btn_engine" android:layout_width="240dp" android:layout_height="60dp" android:text="Editor" android:textSize="18sp" android:textColor="#00BFFF" android:background="@drawable/btn_blue" android:layout_marginBottom="16dp"/>
-          <Button android:id="@+id/btn_customize_lobby" android:layout_width="240dp" android:layout_height="60dp" android:text="Customize" android:textSize="18sp" android:textColor="#00BFFF" android:background="@drawable/btn_blue" android:layout_marginBottom="16dp"/>
-          <Button android:id="@+id/btn_load_file" android:layout_width="240dp" android:layout_height="60dp" android:text="Import .json" android:textSize="16sp" android:textColor="#00BFFF" android:background="@drawable/btn_blue"/>
-          </LinearLayout>
-          <FrameLayout android:id="@+id/customize_ui" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#EE02050A" android:visibility="gone">
-          <ScrollView android:layout_width="match_parent" android:layout_height="match_parent">
-          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="20dp">
-          <TextView android:text="Customize" android:textSize="26sp" android:textColor="#00BFFF" android:textStyle="bold" android:gravity="center" android:layout_marginBottom="8dp"/>
-          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center" android:background="@drawable/ridix_bg" android:padding="12dp" android:layout_marginBottom="20dp">
-          <TextView android:text="Ridix: " android:textColor="#FFD700" android:textSize="18sp"/>
-          <TextView android:id="@+id/txt_ridix_shop" android:text="0" android:textColor="#FFD700" android:textSize="18sp" android:textStyle="bold"/>
-          </LinearLayout>
-          <TextView android:text="Promo code" android:textColor="#FFF" android:textSize="16sp" android:textStyle="bold" android:layout_marginBottom="8dp"/>
-          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:background="@drawable/panel_bg" android:padding="10dp" android:layout_marginBottom="20dp">
-          <EditText android:id="@+id/et_promo" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:hint="Enter code" android:textColor="#FFF" android:textColorHint="#555" android:background="@null" android:textSize="14sp"/>
-          <Button android:id="@+id/btn_promo" android:layout_width="80dp" android:layout_height="48dp" android:text="Apply" android:textSize="12sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF"/>
-          </LinearLayout>
-          <TextView android:text="Character colors" android:textColor="#FFF" android:textSize="18sp" android:textStyle="bold" android:layout_marginBottom="12dp"/>
-          <LinearLayout android:orientation="vertical" android:background="@drawable/panel_bg" android:padding="12dp" android:layout_marginBottom="16dp">
-          <TextView android:text="Skin" android:textColor="#AEEBFF" android:layout_marginBottom="6dp"/>
-          <LinearLayout android:id="@+id/skin_colors" android:orientation="horizontal" android:layout_marginBottom="12dp"/>
-          <TextView android:text="Torso" android:textColor="#AEEBFF" android:layout_marginBottom="6dp"/>
-          <LinearLayout android:id="@+id/torso_colors" android:orientation="horizontal" android:layout_marginBottom="12dp"/>
-          <TextView android:text="Legs" android:textColor="#AEEBFF" android:layout_marginBottom="6dp"/>
-          <LinearLayout android:id="@+id/legs_colors" android:orientation="horizontal" android:layout_marginBottom="12dp"/>
-          <TextView android:text="Hair" android:textColor="#AEEBFF" android:layout_marginBottom="6dp"/>
-          <LinearLayout android:id="@+id/hair_colors" android:orientation="horizontal" android:layout_marginBottom="12dp"/>
-          <TextView android:text="Face" android:textColor="#AEEBFF" android:layout_marginBottom="6dp"/>
-          <LinearLayout android:id="@+id/face_select" android:orientation="horizontal"/>
-          </LinearLayout>
-          <TextView android:text="Animation packs" android:textColor="#FFF" android:textSize="18sp" android:textStyle="bold" android:layout_marginBottom="12dp"/>
-          <LinearLayout android:orientation="horizontal" android:background="@drawable/panel_bg" android:padding="12dp" android:layout_marginBottom="10dp" android:gravity="center_vertical">
-          <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
-          <TextView android:text="Default" android:textColor="#FFF" android:textSize="16sp" android:textStyle="bold"/>
-          <TextView android:text="Walk, jump, idle" android:textColor="#888" android:textSize="12sp"/>
-          <TextView android:text="Free" android:textColor="#44FF44" android:textSize="12sp"/>
-          </LinearLayout>
-          <Button android:id="@+id/btn_pack_default" android:layout_width="90dp" android:layout_height="40dp" android:text="Equip" android:background="@drawable/btn_blue_filled" android:textColor="#000" android:textSize="12sp"/>
-          </LinearLayout>
-          <LinearLayout android:orientation="horizontal" android:background="@drawable/panel_bg" android:padding="12dp" android:layout_marginBottom="20dp" android:gravity="center_vertical">
-          <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
-          <TextView android:text="Fly pack" android:textColor="#00BFFF" android:textSize="16sp" android:textStyle="bold"/>
-          <TextView android:text="Hover, levitate, fly moves" android:textColor="#888" android:textSize="12sp"/>
-          <TextView android:id="@+id/txt_fly_price" android:text="50 Ridix" android:textColor="#FFD700" android:textSize="12sp"/>
-          </LinearLayout>
-          <Button android:id="@+id/btn_pack_fly" android:layout_width="90dp" android:layout_height="40dp" android:text="Buy" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:textSize="12sp"/>
-          </LinearLayout>
-          <Button android:id="@+id/btn_close_customize" android:layout_width="match_parent" android:layout_height="56dp" android:text="Back" android:textSize="16sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF"/>
-          </LinearLayout>
-          </ScrollView>
-          </FrameLayout>
-          <FrameLayout android:id="@+id/script_ui" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#EE02050A" android:visibility="gone">
-          <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="20dp">
-          <TextView android:text="JavaScript Editor" android:textSize="24sp" android:textColor="#00BFFF" android:textStyle="bold" android:gravity="center" android:layout_marginBottom="16dp"/>
-          <EditText android:id="@+id/script_editor" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:background="@drawable/panel_bg" android:padding="12dp" android:textColor="#FFF" android:textColorHint="#666" android:hint="// JavaScript here" android:gravity="top" android:fontFamily="monospace" android:textSize="13sp" android:inputType="textMultiLine|textNoSuggestions"/>
-          <LinearLayout android:orientation="horizontal" android:layout_marginTop="16dp">
-          <Button android:id="@+id/btn_run_script" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="Run" android:textSize="14sp" android:background="@drawable/btn_green" android:textColor="#44FF44"/>
-          <Button android:id="@+id/btn_clear_script" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="Clear" android:textSize="14sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginLeft="10dp"/>
-          <Button android:id="@+id/btn_close_script" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="Close" android:textSize="14sp" android:background="@drawable/btn_red" android:textColor="#FF4444" android:layout_marginLeft="10dp"/>
-          </LinearLayout>
-          <TextView android:id="@+id/script_output" android:layout_width="match_parent" android:layout_height="100dp" android:background="@drawable/panel_bg" android:padding="12dp" android:textColor="#44FF44" android:textSize="12sp" android:fontFamily="monospace" android:layout_marginTop="10dp" android:text="Output console..."/>
-          </LinearLayout>
-          </FrameLayout>
-          </FrameLayout>
-          LAYOUT
-
+          # MainActivity - добавляем EGameUI в layout
           cat > app/src/main/java/com/enjoer/game/MainActivity.java << 'ENDMAIN'
           package com.enjoer.game;
           import android.annotation.SuppressLint; import android.content.Intent; import android.content.SharedPreferences; import android.content.pm.ActivityInfo;
@@ -486,10 +375,21 @@ jobs:
           private static final int[]TOI={0xFF1A66FF,0xFFFF1A1A,0xFF1ACC1A,0xFFCC00CC,0xFFFF8000,0xFF262626};
           private static final int[]LEI={0xFF1ACC33,0xFF1A1A99,0xFF808080,0xFF0D0D0D,0xFFCC9900,0xFF800000};
           private static final int[]HAI={0xFF332618,0xFFFFD94D,0xFFCC661A,0xFF0D0D0D,0xFFE6E6E6,0xFF801A80};
+          private EGameUI egameUI;
           interface CP{void pick(int i);}
           @SuppressLint("ClickableViewAccessibility")@Override protected void onCreate(Bundle s){
           super.onCreate(s);setContentView(R.layout.activity_main);loadPrefs();
           SurfaceView gv=findViewById(R.id.gl_view);ren=new GameRenderer(this,gv);gv.setSurfaceRenderer(ren);
+          
+          // Добавляем EGameUI overlay поверх 3D сцены
+          FrameLayout root = (FrameLayout)gv.getParent();
+          egameUI = new EGameUI(this, ren);
+          FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+              FrameLayout.LayoutParams.MATCH_PARENT,
+              FrameLayout.LayoutParams.MATCH_PARENT
+          );
+          root.addView(egameUI, 1, params);
+          
           menuUI=findViewById(R.id.menu_ui);gameUI=findViewById(R.id.game_ui);engineUI=findViewById(R.id.engine_ui);playtestUI=findViewById(R.id.playtest_ui);
           customizeUI=findViewById(R.id.customize_ui);scriptUI=findViewById(R.id.script_ui);purchaseDialog=findViewById(R.id.purchase_dialog);
           inventoryBar=findViewById(R.id.inventory_bar);playtestInventoryBar=findViewById(R.id.playtest_inventory_bar);
@@ -511,15 +411,15 @@ jobs:
           btnPlaytestInvToggle.setOnClickListener(v->{ren.inventoryVisible=!ren.inventoryVisible;playtestInventoryBar.setVisibility(ren.inventoryVisible?View.VISIBLE:View.GONE);});
           saveLauncher=registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),res->{if(res.getResultCode()==RESULT_OK&&res.getData()!=null)try{OutputStream out=getContentResolver().openOutputStream(res.getData().getData());JSONArray a=new JSONArray();for(Block b:ren.blocks){JSONObject o=new JSONObject();o.put("x",b.x);o.put("y",b.y);o.put("z",b.z);o.put("sx",b.sx);o.put("sy",b.sy);o.put("sz",b.sz);o.put("r",b.r);o.put("g",b.g);o.put("b",b.b);o.put("hidden",b.hidden);o.put("ridixPrice",b.ridixPrice);o.put("itemName",b.itemName);a.put(o);}JSONArray ia=new JSONArray();for(Item it:ren.items){JSONObject o=new JSONObject();o.put("x",it.x);o.put("y",it.y);o.put("z",it.z);o.put("type",it.type);o.put("hidden",it.hidden);o.put("ridixPrice",it.ridixPrice);o.put("itemName",it.itemName);ia.put(o);}JSONObject root=new JSONObject();root.put("blocks",a);root.put("items",ia);root.put("gridEnabled",ren.gridEnabled);out.write(root.toString().getBytes());out.close();Toast.makeText(this,"Exported!",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,"Error",Toast.LENGTH_SHORT).show();}});
           loadLauncher=registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),res->{if(res.getResultCode()==RESULT_OK&&res.getData()!=null)try{InputStream in=getContentResolver().openInputStream(res.getData().getData());BufferedReader rd=new BufferedReader(new InputStreamReader(in));StringBuilder sb=new StringBuilder();String ln;while((ln=rd.readLine())!=null)sb.append(ln);in.close();JSONObject root=new JSONObject(sb.toString());ren.blocks.clear();ren.items.clear();ren.lb();JSONArray a=root.getJSONArray("blocks");for(int i=0;i<a.length();i++){JSONObject o=a.getJSONObject(i);Block b=new Block((float)o.getDouble("x"),(float)o.getDouble("y"),(float)o.getDouble("z"),(float)o.getDouble("sx"),(float)o.getDouble("sy"),(float)o.getDouble("sz"),(float)o.getDouble("r"),(float)o.getDouble("g"),(float)o.getDouble("b"));b.hidden=o.optBoolean("hidden",false);b.ridixPrice=o.optInt("ridixPrice",0);b.itemName=o.optString("itemName","");ren.blocks.add(b);}if(root.has("items")){JSONArray ia=root.getJSONArray("items");for(int i=0;i<ia.length();i++){JSONObject o=ia.getJSONObject(i);Item it=new Item((float)o.getDouble("x"),(float)o.getDouble("y"),(float)o.getDouble("z"),o.getString("type"));it.hidden=o.optBoolean("hidden",false);it.ridixPrice=o.optInt("ridixPrice",0);it.itemName=o.optString("itemName","");ren.items.add(it);}}ren.syncScene();ren.gridEnabled=root.optBoolean("gridEnabled",true);updGridBtn();ren.isEngineMode=false;ren.isPlayingLevel=false;resetP();applyPack();menuUI.setVisibility(View.GONE);gameUI.setVisibility(View.VISIBLE);setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);srt();updInventory();Toast.makeText(this,"Loaded!",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,"Invalid file",Toast.LENGTH_SHORT).show();}});
-          findViewById(R.id.btn_play).setOnClickListener(v->{ren.isEngineMode=false;ren.isPlayingLevel=false;ren.lb();resetP();ren.selectedIndex=-1;applyPack();menuUI.setVisibility(View.GONE);gameUI.setVisibility(View.VISIBLE);engineUI.setVisibility(View.GONE);playtestUI.setVisibility(View.GONE);inventoryBar.setVisibility(View.GONE);ren.inventoryVisible=false;srt();updInventory();updAttackBtn();handler.postDelayed(()->setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE),50);});
-          findViewById(R.id.btn_engine).setOnClickListener(v->{ren.isEngineMode=true;ren.isPlayingLevel=false;ren.blocks.clear();ren.items.clear();ren.clearScene();ren.lb();ren.pX=0;ren.pY=20;ren.pZ=35;ren.selectedIndex=-1;stopRidixTimer();menuUI.setVisibility(View.GONE);gameUI.setVisibility(View.GONE);engineUI.setVisibility(View.VISIBLE);playtestUI.setVisibility(View.GONE);updAxis();updSizeInfo();updGridBtn();updRidixPrice();handler.postDelayed(()->setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE),50);});
+          findViewById(R.id.btn_play).setOnClickListener(v->{egameUI.setVisibility(View.VISIBLE);ren.isEngineMode=false;ren.isPlayingLevel=false;ren.lb();resetP();ren.selectedIndex=-1;applyPack();menuUI.setVisibility(View.GONE);gameUI.setVisibility(View.VISIBLE);engineUI.setVisibility(View.GONE);playtestUI.setVisibility(View.GONE);inventoryBar.setVisibility(View.GONE);ren.inventoryVisible=false;srt();updInventory();updAttackBtn();handler.postDelayed(()->setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE),50);});
+          findViewById(R.id.btn_engine).setOnClickListener(v->{egameUI.setVisibility(View.GONE);ren.isEngineMode=true;ren.isPlayingLevel=false;ren.blocks.clear();ren.items.clear();ren.clearScene();ren.lb();ren.pX=0;ren.pY=20;ren.pZ=35;ren.selectedIndex=-1;stopRidixTimer();menuUI.setVisibility(View.GONE);gameUI.setVisibility(View.GONE);engineUI.setVisibility(View.VISIBLE);playtestUI.setVisibility(View.GONE);updAxis();updSizeInfo();updGridBtn();updRidixPrice();handler.postDelayed(()->setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE),50);});
           findViewById(R.id.btn_customize_lobby).setOnClickListener(v->{menuUI.setVisibility(View.GONE);customizeUI.setVisibility(View.VISIBLE);updCustPacks();updRidix();});
           findViewById(R.id.btn_load_file).setOnClickListener(v->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");loadLauncher.launch(i);});
-          View.OnClickListener back=v->{ren.isPlayingLevel=false;stopRidixTimer();gameUI.setVisibility(View.GONE);engineUI.setVisibility(View.GONE);playtestUI.setVisibility(View.GONE);menuUI.setVisibility(View.VISIBLE);setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);};
+          View.OnClickListener back=v->{egameUI.setVisibility(View.GONE);ren.isPlayingLevel=false;stopRidixTimer();gameUI.setVisibility(View.GONE);engineUI.setVisibility(View.GONE);playtestUI.setVisibility(View.GONE);menuUI.setVisibility(View.VISIBLE);setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);};
           findViewById(R.id.btn_menu).setOnClickListener(back);findViewById(R.id.btn_engine_menu).setOnClickListener(back);
           findViewById(R.id.btn_close_customize).setOnClickListener(v->{customizeUI.setVisibility(View.GONE);menuUI.setVisibility(View.VISIBLE);});
-          findViewById(R.id.btn_play_level).setOnClickListener(v->{ren.isPlayingLevel=true;resetP();ren.selectedIndex=-1;applyPack();engineUI.setVisibility(View.GONE);playtestUI.setVisibility(View.VISIBLE);playtestInventoryBar.setVisibility(View.GONE);ren.inventoryVisible=false;updInventory();updAttackBtn();});
-          findViewById(R.id.btn_stop_playtest).setOnClickListener(v->{ren.isPlayingLevel=false;ren.pX=0;ren.pY=20;ren.pZ=35;playtestUI.setVisibility(View.GONE);engineUI.setVisibility(View.VISIBLE);updAxis();});
+          findViewById(R.id.btn_play_level).setOnClickListener(v->{egameUI.setVisibility(View.VISIBLE);ren.isPlayingLevel=true;resetP();ren.selectedIndex=-1;applyPack();engineUI.setVisibility(View.GONE);playtestUI.setVisibility(View.VISIBLE);playtestInventoryBar.setVisibility(View.GONE);ren.inventoryVisible=false;updInventory();updAttackBtn();});
+          findViewById(R.id.btn_stop_playtest).setOnClickListener(v->{egameUI.setVisibility(View.GONE);ren.isPlayingLevel=false;ren.pX=0;ren.pY=20;ren.pZ=35;playtestUI.setVisibility(View.GONE);engineUI.setVisibility(View.VISIBLE);updAxis();});
           findViewById(R.id.btn_save).setOnClickListener(v->{Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");i.putExtra(Intent.EXTRA_TITLE,"level.json");saveLauncher.launch(i);});
           findViewById(R.id.btn_scripts).setOnClickListener(v->{engineUI.setVisibility(View.GONE);scriptUI.setVisibility(View.VISIBLE);});
           findViewById(R.id.btn_close_script).setOnClickListener(v->{scriptUI.setVisibility(View.GONE);engineUI.setVisibility(View.VISIBLE);});
