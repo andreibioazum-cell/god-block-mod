@@ -1,379 +1,217 @@
-name: Enjoer_7.2_Rajawali_ThirdPerson_Follow
-on: [push, workflow_dispatch]
+name: Auto-Build Enjoer Engine APK
+on: 
+  push:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - name: Установка Java для Android
+        uses: actions/setup-java@v3
         with:
-          java-version: '17'
           distribution: 'temurin'
+          java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Установка Android NDK
+        run: echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.2.9519653"
 
-      - name: Create Project Structure
+      - name: Установка Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Установка сборщика APK (cargo-apk)
+        run: cargo install cargo-apk
+
+      - name: Генерация кода игры
         run: |
-          mkdir -p app/src/main/java/com/enjoer/game
-          mkdir -p app/src/main/res/layout
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/drawable
-          rm -f app/src/main/java/com/enjoer/game/*
+          mkdir enjoer_engine
+          cd enjoer_engine
+          
+          # Создаем Cargo.toml
+          cat << 'EOF' > Cargo.toml
+          [package]
+          name = "enjoer_engine"
+          version = "7.0.0"
+          edition = "2021"
 
-      - name: Create Resources
-        run: |
-          cat > app/src/main/res/values/themes.xml << 'EOF'
-          <resources><style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar"><item name="android:windowFullscreen">true</item></style></resources>
+          [lib]
+          name = "enjoer_engine"
+          path = "src/main.rs"
+          crate-type = ["cdylib", "rlib"]
+
+          [dependencies]
+          bevy = "0.14.0"
+          bevy_egui = "0.28.0"
+
+          [package.metadata.android]
+          apk_name = "EnjoerEngine"
+          build_targets = ["aarch64-linux-android"]
+          min_sdk_version = 24
+          target_sdk_version = 33
+          strip = "strip"
           EOF
           
-          # Отрисовка кнопок
-          cat > app/src/main/res/drawable/btn_blue.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"><corners android:radius="8dp"/><solid android:color="#101820"/><stroke android:width="2dp" android:color="#00BFFF"/></shape>
-          EOF
-          cat > app/src/main/res/drawable/btn_blue_filled.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"><corners android:radius="8dp"/><solid android:color="#00BFFF"/></shape>
-          EOF
-          cat > app/src/main/res/drawable/btn_red.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"><corners android:radius="8dp"/><solid android:color="#101820"/><stroke android:width="2dp" android:color="#FF4444"/></shape>
-          EOF
-          cat > app/src/main/res/drawable/btn_green.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"><corners android:radius="8dp"/><solid android:color="#101820"/><stroke android:width="2dp" android:color="#44FF44"/></shape>
-          EOF
-          cat > app/src/main/res/drawable/panel_bg.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"><corners android:radius="8dp"/><solid android:color="#E60A0F14"/><stroke android:width="1dp" android:color="#00BFFF"/></shape>
-          EOF
-          cat > app/src/main/res/drawable/ridix_bg.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"><corners android:radius="12dp"/><solid android:color="#CC0A1428"/><stroke android:width="2dp" android:color="#FFD700"/></shape>
-          EOF
-          cat > app/src/main/res/drawable/joy_base.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval"><solid android:color="#AA101820"/><stroke android:width="2dp" android:color="#00BFFF"/></shape>
-          EOF
-          cat > app/src/main/res/drawable/joy_stick.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval"><solid android:color="#00BFFF"/></shape>
-          EOF
-          cat > app/src/main/res/drawable/crosshair.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval"><solid android:color="#FF00BFFF"/></shape>
-          EOF
-          cat > app/src/main/res/drawable/color_btn.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval"><solid android:color="#FFF"/><stroke android:width="2dp" android:color="#00BFFF"/></shape>
-          EOF
-          cat > app/src/main/res/drawable/inv_slot.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"><corners android:radius="6dp"/><solid android:color="#AA101820"/><stroke android:width="2dp" android:color="#00BFFF"/></shape>
+          # Создаем код игры (Rust Bevy)
+          mkdir src
+          cat << 'EOF' > src/main.rs
+          use bevy::prelude::*;
+          use bevy::window::PrimaryWindow;
+          use bevy_egui::{egui, EguiContexts, EguiPlugin};
+
+          #[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
+          enum GameState { #[default] MainMenu, Editor, Playtest }
+
+          #[derive(Component)] struct Player { velocity: f32, is_grounded: bool }
+          #[derive(Component)] struct GameBlock { size: Vec3, color: Color }
+
+          #[derive(Resource, Default)]
+          struct MobileControls {
+              move_dir: Vec2,
+              look_delta: Vec2,
+              jump_pressed: bool,
+              place_pressed: bool,
+          }
+
+          #[derive(Resource)]
+          struct EditorSettings {
+              block_size: Vec3, block_color: Color, place_distance: f32,
+          }
+
+          impl Default for EditorSettings {
+              fn default() -> Self {
+                  Self { block_size: Vec3::splat(4.0), block_color: Color::srgb(0.3, 0.6, 1.0), place_distance: 12.0 }
+              }
+          }
+
+          #[bevy_main]
+          fn main() {
+              App::new()
+                  .add_plugins(DefaultPlugins.set(WindowPlugin {
+                      primary_window: Some(Window { title: "Enjoer Engine 7.0".to_string(), fit_canvas_to_parent: true, ..default() }),
+                      ..default()
+                  }))
+                  .add_plugins(EguiPlugin)
+                  .init_state::<GameState>()
+                  .init_resource::<EditorSettings>()
+                  .init_resource::<MobileControls>()
+                  .add_systems(Startup, setup_world)
+                  .add_systems(Update, touch_input_system)
+                  .add_systems(Update, ui_system)
+                  .add_systems(Update, (player_movement, camera_look).run_if(not(in_state(GameState::MainMenu))))
+                  .add_systems(Update, editor_placement.run_if(in_state(GameState::Editor)))
+                  .run();
+          }
+
+          fn setup_world(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+              commands.spawn(PointLightBundle { transform: Transform::from_xyz(-5.0, 8.0, -8.0), ..default() });
+              commands.insert_resource(AmbientLight { color: Color::srgb(0.8, 0.9, 1.0), brightness: 150.0 });
+              commands.spawn(PbrBundle {
+                  mesh: meshes.add(Plane3d::default().mesh().size(800.0, 800.0)),
+                  material: materials.add(StandardMaterial { base_color: Color::srgb(0.07, 0.12, 0.2), ..default() }),
+                  ..default()
+              });
+              commands.spawn((
+                  Camera3dBundle { transform: Transform::from_xyz(0.0, 6.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y), ..default() },
+                  Player { velocity: 0.0, is_grounded: false },
+              ));
+          }
+
+          fn touch_input_system(touches: Res<Touches>, q_windows: Query<&Window, With<PrimaryWindow>>, mut controls: ResMut<MobileControls>) {
+              controls.move_dir = Vec2::ZERO; controls.look_delta = Vec2::ZERO;
+              if let Ok(window) = q_windows.get_single() {
+                  let w = window.width();
+                  for touch in touches.iter() {
+                      if touch.position().x < w / 2.0 {
+                          let delta = touch.position() - touch.start_position();
+                          controls.move_dir = (delta / 80.0).clamp_length_max(1.0);
+                          controls.move_dir.y = -controls.move_dir.y;
+                      } else { controls.look_delta = touch.delta(); }
+                  }
+              }
+          }
+
+          fn ui_system(mut contexts: EguiContexts, state: Res<State<GameState>>, mut next_state: ResMut<NextState<GameState>>, mut editor: ResMut<EditorSettings>, mut controls: ResMut<MobileControls>) {
+              let ctx = contexts.ctx_mut();
+              controls.jump_pressed = false; controls.place_pressed = false;
+
+              match state.get() {
+                  GameState::MainMenu => {
+                      egui::CentralPanel::default().show(ctx, |ui| {
+                          ui.vertical_centered(|ui| {
+                              ui.heading("Enjoer Engine 7.0 (Rust Edition)");
+                              ui.add_space(50.0);
+                              if ui.add_sized([200.0, 60.0], egui::Button::new("Playtest")).clicked() { next_state.set(GameState::Playtest); }
+                              ui.add_space(20.0);
+                              if ui.add_sized([200.0, 60.0], egui::Button::new("Editor")).clicked() { next_state.set(GameState::Editor); }
+                          });
+                      });
+                  }
+                  GameState::Editor => {
+                      egui::TopBottomPanel::top("editor_top").show(ctx, |ui| {
+                          ui.horizontal(|ui| {
+                              if ui.button("Menu").clicked() { next_state.set(GameState::MainMenu); }
+                              if ui.button("Play").clicked() { next_state.set(GameState::Playtest); }
+                          });
+                      });
+                      egui::TopBottomPanel::bottom("editor_bottom").show(ctx, |ui| {
+                          ui.vertical_centered(|ui| { if ui.add_sized([150.0, 60.0], egui::Button::new("PLACE BLOCK")).clicked() { controls.place_pressed = true; } });
+                      });
+                  }
+                  GameState::Playtest => {
+                      egui::TopBottomPanel::top("pt_top").show(ctx, |ui| { if ui.button("Stop").clicked() { next_state.set(GameState::Editor); } });
+                      egui::TopBottomPanel::bottom("pt_bot").show(ctx, |ui| {
+                          ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { if ui.add_sized([100.0, 80.0], egui::Button::new("JUMP")).clicked() { controls.jump_pressed = true; } });
+                      });
+                  }
+              }
+          }
+
+          fn camera_look(mut q_camera: Query<&mut Transform, With<Camera>>, controls: Res<MobileControls>) {
+              if controls.look_delta != Vec2::ZERO {
+                  let mut transform = q_camera.single_mut();
+                  let (mut yaw, mut pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
+                  yaw -= controls.look_delta.x * 0.005; pitch -= controls.look_delta.y * 0.005; pitch = pitch.clamp(-1.5, 1.5);
+                  transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
+              }
+          }
+
+          fn player_movement(time: Res<Time>, controls: Res<MobileControls>, mut q_player: Query<(&mut Transform, &mut Player)>) {
+              for (mut transform, mut player) in q_player.iter_mut() {
+                  let forward = transform.forward(); let right = transform.right();
+                  let mut direction = forward * controls.move_dir.y + right * controls.move_dir.x;
+                  direction.y = 0.0; if direction.length_squared() > 0.0 { direction = direction.normalize(); }
+                  if transform.translation.y <= 2.0 { transform.translation.y = 2.0; player.is_grounded = true; player.velocity = 0.0;
+                  } else { player.is_grounded = false; player.velocity -= 15.0 * time.delta_seconds(); }
+                  if controls.jump_pressed && player.is_grounded { player.velocity = 8.0; }
+                  transform.translation += direction * 10.0 * time.delta_seconds(); transform.translation.y += player.velocity * time.delta_seconds();
+              }
+          }
+
+          fn editor_placement(controls: Res<MobileControls>, editor: Res<EditorSettings>, q_camera: Query<&Transform, With<Camera>>, mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+              if controls.place_pressed {
+                  if let Ok(cam_transform) = q_camera.get_single() {
+                      let forward = cam_transform.forward();
+                      let mut p = cam_transform.translation + forward * editor.place_distance;
+                      if p.y - (editor.block_size.y / 2.0) < 0.0 { p.y = editor.block_size.y / 2.0; }
+                      commands.spawn((
+                          PbrBundle { mesh: meshes.add(Cuboid::new(editor.block_size.x, editor.block_size.y, editor.block_size.z)), material: materials.add(editor.block_color), transform: Transform::from_translation(p), ..default() },
+                          GameBlock { size: editor.block_size, color: editor.block_color },
+                      ));
+                  }
+              }
+          }
           EOF
 
-      - name: Create Complex Layout
+      - name: Сборка APK файла
         run: |
-          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#02050A">
-              
-              <org.rajawali3d.view.SurfaceView android:id="@+id/gl_view" android:layout_width="match_parent" android:layout_height="match_parent"/>
-              
-              <!-- ЗОНА ДЛЯ ПОВОРОТА КАМЕРЫ (Весь экран) -->
-              <View android:id="@+id/look_zone" android:layout_width="match_parent" android:layout_height="match_parent" android:clickable="true"/>
+          cd enjoer_engine
+          export ANDROID_NDK_ROOT=/usr/local/lib/android/sdk/ndk/25.2.9519653
+          cargo apk build --release
 
-              <!-- ENGINE EDITOR UI -->
-              <RelativeLayout android:id="@+id/engine_ui" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone">
-                  <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_margin="10dp">
-                      <Button android:id="@+id/btn_engine_menu" android:layout_width="60dp" android:layout_height="40dp" android:text="Exit" android:textSize="10sp" android:background="@drawable/btn_red" android:textColor="#FF4444"/>
-                      <Button android:id="@+id/btn_play_level" android:layout_width="60dp" android:layout_height="40dp" android:text="Play" android:textSize="10sp" android:background="@drawable/btn_green" android:textColor="#44FF44" android:layout_marginLeft="5dp"/>
-                      <Button android:id="@+id/btn_save" android:layout_width="60dp" android:layout_height="40dp" android:text="Exp" android:textSize="10sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginLeft="5dp"/>
-                      <Button android:id="@+id/btn_scripts" android:layout_width="60dp" android:layout_height="40dp" android:text="JS" android:textSize="10sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginLeft="5dp"/>
-                  </LinearLayout>
-
-                  <ScrollView android:layout_width="160dp" android:layout_height="match_parent" android:layout_alignParentRight="true" android:background="#D9050A14" android:padding="8dp">
-                      <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
-                          <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Type" android:textColor="#00BFFF" android:textStyle="bold" android:textSize="12sp"/>
-                          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="5dp">
-                              <Button android:id="@+id/type_block" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="Block" android:textSize="9sp" android:background="@drawable/btn_blue_filled" android:textColor="#000"/>
-                              <Button android:id="@+id/type_item" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:text="Item" android:textSize="9sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginLeft="4dp"/>
-                          </LinearLayout>
-                          <Button android:id="@+id/type_text" android:layout_width="match_parent" android:layout_height="36dp" android:text="Text" android:textSize="9sp" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginTop="4dp"/>
-
-                          <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Settings" android:textColor="#FFF" android:layout_marginTop="10dp" android:textSize="11sp"/>
-                          <EditText android:id="@+id/purchase_name" android:layout_width="match_parent" android:layout_height="36dp" android:hint="Obj Name" android:textColor="#FFF" android:background="@drawable/panel_bg" android:textSize="11sp" android:paddingLeft="5dp"/>
-                          
-                          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:background="@drawable/ridix_bg" android:orientation="vertical" android:padding="5dp">
-                              <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Price" android:textColor="#FFD700" android:textSize="10sp"/>
-                              <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
-                                  <Button android:id="@+id/ridix_minus" android:layout_width="35dp" android:layout_height="30dp" android:text="-10" android:textSize="8sp" android:background="@drawable/btn_blue"/>
-                                  <TextView android:id="@+id/ridix_value" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="0" android:textColor="#FFD700" android:gravity="center"/>
-                                  <Button android:id="@+id/ridix_plus" android:layout_width="35dp" android:layout_height="30dp" android:text="+10" android:textSize="8sp" android:background="@drawable/btn_blue"/>
-                              </LinearLayout>
-                          </LinearLayout>
-
-                          <Button android:id="@+id/btn_grid" android:layout_width="match_parent" android:layout_height="36dp" android:text="Grid: On" android:textSize="10sp" android:background="@drawable/btn_blue" android:layout_marginTop="10dp"/>
-                          <Button android:id="@+id/btn_place" android:layout_width="match_parent" android:layout_height="45dp" android:text="PLACE" android:textStyle="bold" android:background="@drawable/btn_blue_filled" android:textColor="#000" android:layout_marginTop="12dp"/>
-                      </LinearLayout>
-                  </ScrollView>
-                  
-                  <LinearLayout android:id="@+id/axis_panel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_alignParentBottom="true" android:layout_centerHorizontal="true" android:layout_marginBottom="20dp" android:background="@drawable/panel_bg" android:padding="5dp" android:visibility="gone">
-                      <Button android:id="@+id/axis_x_plus" android:layout_width="40dp" android:layout_height="40dp" android:text="X+" android:background="@drawable/btn_blue"/>
-                      <Button android:id="@+id/axis_y_plus" android:layout_width="40dp" android:layout_height="40dp" android:text="Y+" android:background="@drawable/btn_blue" android:layout_marginLeft="5dp"/>
-                      <Button android:id="@+id/axis_z_plus" android:layout_width="40dp" android:layout_height="40dp" android:text="Z+" android:background="@drawable/btn_blue" android:layout_marginLeft="5dp"/>
-                  </LinearLayout>
-
-                  <View android:id="@+id/crosshair_engine" android:layout_width="10dp" android:layout_height="10dp" android:layout_centerInParent="true" android:background="@drawable/crosshair"/>
-              </RelativeLayout>
-
-              <!-- PLAYTEST HUD -->
-              <RelativeLayout android:id="@+id/playtest_ui" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone">
-                  <Button android:id="@+id/btn_stop_playtest" android:layout_width="70dp" android:layout_height="45dp" android:text="Stop" android:background="@drawable/btn_red" android:layout_margin="10dp"/>
-                  <FrameLayout android:id="@+id/playtest_joy_base" android:layout_width="120dp" android:layout_height="120dp" android:layout_alignParentBottom="true" android:layout_margin="30dp" android:background="@drawable/joy_base">
-                      <View android:id="@+id/playtest_joy_stick" android:layout_width="50dp" android:layout_height="50dp" android:layout_gravity="center" android:background="@drawable/joy_stick"/>
-                  </FrameLayout>
-                  <Button android:id="@+id/btn_playtest_jump" android:layout_width="80dp" android:layout_height="80dp" android:layout_alignParentRight="true" android:layout_alignParentBottom="true" android:layout_margin="40dp" android:text="Jump" android:background="@drawable/btn_blue"/>
-              </RelativeLayout>
-
-              <!-- MAIN MENU -->
-              <LinearLayout android:id="@+id/menu_ui" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center" android:background="#02050A">
-                  <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ENJOER 7.2" android:textSize="50sp" android:textColor="#00BFFF" android:textStyle="bold"/>
-                  <TextView android:id="@+id/txt_ridix_lobby" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ridix: 0" android:textColor="#FFD700" android:textSize="18sp" android:layout_marginBottom="30dp"/>
-                  <Button android:id="@+id/btn_play" android:layout_width="220dp" android:layout_height="55dp" android:text="Play" android:background="@drawable/btn_blue" android:textColor="#00BFFF" android:layout_marginBottom="15dp"/>
-                  <Button android:id="@+id/btn_engine" android:layout_width="220dp" android:layout_height="55dp" android:text="Editor" android:background="@drawable/btn_blue" android:textColor="#00BFFF"/>
-              </LinearLayout>
-
-              <!-- PURCHASE POPUP -->
-              <FrameLayout android:id="@+id/purchase_dialog" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#CC000000" android:visibility="gone" android:clickable="true">
-                  <LinearLayout android:layout_width="280dp" android:layout_height="wrap_content" android:layout_gravity="center" android:orientation="vertical" android:background="@drawable/ridix_bg" android:padding="20dp">
-                      <TextView android:id="@+id/purchase_item_name" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Premium Item" android:textColor="#FFF" android:gravity="center" android:textSize="18sp"/>
-                      <TextView android:id="@+id/purchase_price" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Price: 100" android:textColor="#FFD700" android:gravity="center" android:layout_marginTop="10dp"/>
-                      <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp">
-                          <Button android:id="@+id/btn_purchase_cancel" android:layout_width="0dp" android:layout_height="45dp" android:layout_weight="1" android:text="No" android:background="@drawable/btn_red"/>
-                          <Button android:id="@+id/btn_purchase_buy" android:layout_width="0dp" android:layout_height="45dp" android:layout_weight="1" android:text="Buy" android:background="@drawable/btn_green" android:layout_marginLeft="10dp"/>
-                      </LinearLayout>
-                  </LinearLayout>
-              </FrameLayout>
-
-              <!-- SCRIPT UI -->
-              <LinearLayout android:id="@+id/script_ui" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="#EE02050A" android:padding="20dp" android:visibility="gone">
-                  <EditText android:id="@+id/script_editor" android:layout_width="match_parent" android:layout_weight="1" android:layout_height="0dp" android:background="@drawable/panel_bg" android:textColor="#FFF" android:gravity="top" android:padding="10dp" android:hint="// Write JS here..."/>
-                  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp">
-                      <Button android:id="@+id/btn_run_script" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="Run" android:background="@drawable/btn_green"/>
-                      <Button android:id="@+id/btn_close_script" android:layout_width="0dp" android:layout_height="50dp" android:layout_weight="1" android:text="Close" android:background="@drawable/btn_red" android:layout_marginLeft="10dp"/>
-                  </LinearLayout>
-              </LinearLayout>
-
-          </FrameLayout>
-          EOF
-
-      - name: Create Classes
-        run: |
-          cat > app/src/main/java/com/enjoer/game/Block.java << 'EOF'
-          package com.enjoer.game;
-          public class Block {
-              public float x,y,z,sx,sy,sz,r,g,b;
-              public int ridixPrice=0;
-              public boolean purchased=false;
-              public String itemName="";
-              public Block(float x,float y,float z,float sx,float sy,float sz,float r,float g,float b){
-                  this.x=x;this.y=y;this.z=z;this.sx=sx;this.sy=sy;this.sz=sz;this.r=r;this.g=g;this.b=b;
-              }
-          }
-          EOF
-
-          cat > app/src/main/java/com/enjoer/game/GameRenderer.java << 'EOF'
-          package com.enjoer.game;
-          import android.content.Context;
-          import android.view.MotionEvent;
-          import org.rajawali3d.Object3D;
-          import org.rajawali3d.lights.DirectionalLight;
-          import org.rajawali3d.materials.Material;
-          import org.rajawali3d.math.vector.Vector3;
-          import org.rajawali3d.primitives.Cube;
-          import org.rajawali3d.renderer.Renderer;
-          import org.rajawali3d.view.SurfaceView;
-          import java.util.concurrent.CopyOnWriteArrayList;
-
-          public class GameRenderer extends Renderer {
-              public float pX=0, pY=2, pZ=0, jX=0, jY=0;
-              public float camYaw = 0, camPitch = 25; // Углы поворота камеры
-              public float camDist = 12f;
-              public boolean isEngineMode = false;
-              public CopyOnWriteArrayList<Block> blocks = new CopyOnWriteArrayList<>();
-              private Object3D player;
-
-              public GameRenderer(Context ctx, SurfaceView sv) { super(ctx); }
-
-              @Override
-              protected void initScene() {
-                  getCurrentScene().setBackgroundColor(0.01f, 0.02f, 0.08f, 1f);
-                  DirectionalLight light = new DirectionalLight(0.2f, -1f, -0.5f);
-                  light.setPower(2.5f);
-                  getCurrentScene().addLight(light);
-
-                  player = new Cube(1.5f);
-                  Material m = new Material();
-                  m.setColor(0xFFFF0000); // Красный куб
-                  player.setMaterial(m);
-                  player.setPosition(0, 0.75f, 0);
-                  getCurrentScene().addChild(player);
-
-                  Cube floor = new Cube(500);
-                  Material fm = new Material(); fm.setColor(0x222222);
-                  floor.setMaterial(fm); floor.setY(-250.1f);
-                  getCurrentScene().addChild(floor);
-              }
-
-              @Override
-              protected void onRender(long elapsedTime, double deltaTime) {
-                  super.onRender(elapsedTime, deltaTime);
-                  
-                  // Расчет движения относительно направления камеры
-                  double yawRad = Math.toRadians(camYaw);
-                  float dx = (float) (Math.sin(yawRad) * -jY + Math.cos(yawRad) * jX);
-                  float dz = (float) (Math.cos(yawRad) * -jY - Math.sin(yawRad) * jX);
-                  
-                  pX += dx * 0.25f;
-                  pZ += dz * 0.25f;
-                  player.setX(pX); player.setZ(pZ);
-
-                  // Расчет позиции камеры от 3-го лица
-                  double pitchRad = Math.toRadians(camPitch);
-                  double cx = pX + camDist * Math.sin(yawRad) * Math.cos(pitchRad);
-                  double cy = (pY + 1) + camDist * Math.sin(pitchRad);
-                  double cz = pZ + camDist * Math.cos(yawRad) * Math.cos(pitchRad);
-
-                  getCurrentCamera().setPosition(cx, cy, cz);
-                  getCurrentCamera().setLookAt(pX, pY + 1, pZ);
-              }
-
-              @Override public void onOffsetsChanged(float x, float y, float z, float w, int i, int j) {}
-              @Override public void onTouchEvent(MotionEvent e) {}
-          }
-          EOF
-
-          cat > app/src/main/java/com/enjoer/game/MainActivity.java << 'EOF'
-          package com.enjoer.game;
-          import android.annotation.SuppressLint;
-          import android.os.Bundle;
-          import android.view.MotionEvent;
-          import android.view.View;
-          import android.widget.*;
-          import androidx.appcompat.app.AppCompatActivity;
-          import org.rajawali3d.view.SurfaceView;
-          import org.mozilla.javascript.Context;
-          import org.mozilla.javascript.Scriptable;
-
-          public class MainActivity extends AppCompatActivity {
-              private GameRenderer renderer;
-              private int ridix = 0;
-              private float lastX, lastY;
-              private View menuUI, engineUI, playtestUI, scriptUI, purchaseUI;
-
-              @SuppressLint("ClickableViewAccessibility")
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-                  setContentView(R.layout.activity_main);
-
-                  SurfaceView glView = findViewById(R.id.gl_view);
-                  renderer = new GameRenderer(this, glView);
-                  glView.setSurfaceRenderer(renderer);
-
-                  menuUI = findViewById(R.id.menu_ui);
-                  engineUI = findViewById(R.id.engine_ui);
-                  playtestUI = findViewById(R.id.playtest_ui);
-                  scriptUI = findViewById(R.id.script_ui);
-                  purchaseUI = findViewById(R.id.purchase_dialog);
-
-                  findViewById(R.id.btn_play).setOnClickListener(v -> { menuUI.setVisibility(View.GONE); playtestUI.setVisibility(View.VISIBLE); });
-                  findViewById(R.id.btn_engine).setOnClickListener(v -> { menuUI.setVisibility(View.GONE); engineUI.setVisibility(View.VISIBLE); });
-                  findViewById(R.id.btn_stop_playtest).setOnClickListener(v -> { playtestUI.setVisibility(View.GONE); menuUI.setVisibility(View.VISIBLE); });
-                  findViewById(R.id.btn_engine_menu).setOnClickListener(v -> { engineUI.setVisibility(View.GONE); menuUI.setVisibility(View.VISIBLE); });
-                  findViewById(R.id.btn_scripts).setOnClickListener(v -> scriptUI.setVisibility(View.VISIBLE));
-                  findViewById(R.id.btn_close_script).setOnClickListener(v -> scriptUI.setVisibility(View.GONE));
-
-                  // Управление джойстиком
-                  setupJoy(findViewById(R.id.playtest_joy_base), findViewById(R.id.playtest_joy_stick));
-
-                  // Управление камерой (Свайпы по зоне Look Zone)
-                  findViewById(R.id.look_zone).setOnTouchListener((v, e) -> {
-                      if (e.getAction() == MotionEvent.ACTION_DOWN) {
-                          lastX = e.getX(); lastY = e.getY();
-                      } else if (e.getAction() == MotionEvent.ACTION_MOVE) {
-                          float dx = e.getX() - lastX;
-                          float dy = e.getY() - lastY;
-                          renderer.camYaw -= dx * 0.3f;
-                          renderer.camPitch = Math.max(5, Math.min(85, renderer.camPitch + dy * 0.3f));
-                          lastX = e.getX(); lastY = e.getY();
-                      }
-                      return true;
-                  });
-
-                  findViewById(R.id.btn_run_script).setOnClickListener(v -> {
-                      EditText ed = findViewById(R.id.script_editor);
-                      runScript(ed.getText().toString());
-                  });
-              }
-
-              private void setupJoy(View base, View stick) {
-                  base.setOnTouchListener((v, e) -> {
-                      if (e.getAction() == MotionEvent.ACTION_MOVE || e.getAction() == MotionEvent.ACTION_DOWN) {
-                          float dx = e.getX() - 60; float dy = e.getY() - 60;
-                          float dist = (float)Math.sqrt(dx*dx + dy*dy);
-                          if(dist > 60) { dx *= 60/dist; dy *= 60/dist; }
-                          renderer.jX = dx/60f; renderer.jY = dy/60f;
-                          stick.setTranslationX(dx); stick.setTranslationY(dy);
-                      } else {
-                          renderer.jX = 0; renderer.jY = 0; stick.setTranslationX(0); stick.setTranslationY(0);
-                      }
-                      return true;
-                  });
-              }
-
-              private void runScript(String code) {
-                  Context rhino = Context.enter();
-                  rhino.setOptimizationLevel(-1);
-                  try {
-                      Scriptable scope = rhino.initStandardObjects();
-                      rhino.evaluateString(scope, code, "Script", 1, null);
-                      Toast.makeText(this, "Script Success", Toast.LENGTH_SHORT).show();
-                  } catch (Exception e) {
-                      Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                  } finally { Context.exit(); }
-              }
-          }
-          EOF
-
-      - name: Build and Upload
-        run: |
-          cat > build.gradle << 'EOF'
-          buildscript { repositories { google(); mavenCentral() }; dependencies { classpath 'com.android.tools.build:gradle:8.2.2' } }
-          allprojects { repositories { google(); mavenCentral() } }
-          EOF
-          cat > app/build.gradle << 'EOF'
-          plugins { id 'com.android.application' }
-          android { namespace 'com.enjoer.game'; compileSdk 34; defaultConfig { applicationId 'com.enjoer.game'; minSdk 24; targetSdk 34; versionCode 1; versionName "7.2" } }
-          dependencies { 
-              implementation 'androidx.appcompat:appcompat:1.6.1'
-              implementation 'org.rajawali3d:rajawali:1.1.777'
-              implementation 'org.mozilla:rhino:1.7.14'
-          }
-          EOF
-          echo "include ':app'" > settings.gradle
-          cat > app/src/main/AndroidManifest.xml << 'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <application android:label="Enjoer 7.2" android:theme="@style/AppTheme">
-                  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="landscape">
-                      <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
-          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
-          unzip -q gradle-8.5-bin.zip
-          export PATH="$PWD/gradle-8.5/bin:$PATH"
-          gradle wrapper --gradle-version 8.5
-          ./gradlew assembleDebug
-
-      - name: Upload APK
+      - name: Выдача APK для скачивания
         uses: actions/upload-artifact@v4
         with:
-          name: Enjoer_7.2_Final_Rajawali
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Enjoer-Engine-APK
+          path: enjoer_engine/target/release/apk/*.apk
