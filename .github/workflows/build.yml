@@ -7,7 +7,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Освобождение памяти на сервере (Фикс вылета)
+      - name: Освобождение памяти на сервере (Фикс вылета OOM)
         run: |
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
@@ -23,7 +23,7 @@ jobs:
       - name: Установка Android NDK и SDK
         run: |
           yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses
-          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" "platforms;android-33" "build-tools;33.0.2"
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" "platforms;android-30" "platforms;android-33" "build-tools;33.0.2" "build-tools;30.0.3"
 
       - name: Установка Rust
         uses: dtolnay/rust-toolchain@stable
