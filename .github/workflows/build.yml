@@ -7,6 +7,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Освобождение памяти на сервере (Фикс вылета)
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+
       - name: Установка Java для Android
         uses: actions/setup-java@v3
         with:
@@ -16,7 +23,7 @@ jobs:
       - name: Установка Android NDK и SDK
         run: |
           yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses
-          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" "platforms;android-30" "platforms;android-33" "build-tools;33.0.2" "build-tools;30.0.3"
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" "platforms;android-33" "build-tools;33.0.2"
 
       - name: Установка Rust
         uses: dtolnay/rust-toolchain@stable
@@ -40,7 +47,7 @@ jobs:
           [lib]
           name = "enjoer_engine"
           path = "src/main.rs"
-          crate-type = ["cdylib", "rlib"]
+          crate-type = ["cdylib"]
 
           [dependencies]
           bevy = "0.14.0"
@@ -52,6 +59,11 @@ jobs:
           min_sdk_version = 24
           target_sdk_version = 33
           strip = "strip"
+
+          [profile.release]
+          opt-level = 's'
+          lto = false
+          codegen-units = 16
           EOF
           
           mkdir src
@@ -64,7 +76,7 @@ jobs:
           enum GameState { #[default] MainMenu, Editor, Playtest }
 
           #[derive(Component)] struct Player { velocity: f32, is_grounded: bool }
-          #[derive(Component)] struct GameBlock { size: Vec3, color: Color }
+          #[derive(Component)] struct GameBlock;
 
           #[derive(Resource, Default)]
           struct MobileControls {
@@ -132,7 +144,7 @@ jobs:
               }
           }
 
-          fn ui_system(mut contexts: EguiContexts, state: Res<State<GameState>>, mut next_state: ResMut<NextState<GameState>>, mut editor: ResMut<EditorSettings>, mut controls: ResMut<MobileControls>) {
+          fn ui_system(mut contexts: EguiContexts, state: Res<State<GameState>>, mut next_state: ResMut<NextState<GameState>>, mut controls: ResMut<MobileControls>) {
               let ctx = contexts.ctx_mut();
               controls.jump_pressed = false; controls.place_pressed = false;
 
@@ -140,7 +152,7 @@ jobs:
                   GameState::MainMenu => {
                       egui::CentralPanel::default().show(ctx, |ui| {
                           ui.vertical_centered(|ui| {
-                              ui.heading("Enjoer Engine 7.0 (Rust Edition)");
+                              ui.heading("Enjoer Engine 7.0 (Rust)");
                               ui.add_space(50.0);
                               if ui.add_sized([200.0, 60.0], egui::Button::new("Playtest")).clicked() { next_state.set(GameState::Playtest); }
                               ui.add_space(20.0);
@@ -197,7 +209,7 @@ jobs:
                       if p.y - (editor.block_size.y / 2.0) < 0.0 { p.y = editor.block_size.y / 2.0; }
                       commands.spawn((
                           PbrBundle { mesh: meshes.add(Cuboid::new(editor.block_size.x, editor.block_size.y, editor.block_size.z)), material: materials.add(editor.block_color), transform: Transform::from_translation(p), ..default() },
-                          GameBlock { size: editor.block_size, color: editor.block_color },
+                          GameBlock,
                       ));
                   }
               }
@@ -209,7 +221,7 @@ jobs:
           cd enjoer_engine
           export ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/25.2.9519653
           export ANDROID_SDK_ROOT=${ANDROID_HOME}
-          cargo apk build --release
+          cargo apk build --release -v
 
       - name: Выдача APK для скачивания
         uses: actions/upload-artifact@v4
