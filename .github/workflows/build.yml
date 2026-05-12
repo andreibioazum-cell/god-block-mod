@@ -13,8 +13,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Установка Android NDK
-        run: echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --install "ndk;25.2.9519653"
+      - name: Установка Android NDK и SDK
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" "platforms;android-33" "build-tools;33.0.2"
 
       - name: Установка Rust
         uses: dtolnay/rust-toolchain@stable
@@ -29,7 +31,6 @@ jobs:
           mkdir enjoer_engine
           cd enjoer_engine
           
-          # Создаем Cargo.toml
           cat << 'EOF' > Cargo.toml
           [package]
           name = "enjoer_engine"
@@ -53,7 +54,6 @@ jobs:
           strip = "strip"
           EOF
           
-          # Создаем код игры (Rust Bevy)
           mkdir src
           cat << 'EOF' > src/main.rs
           use bevy::prelude::*;
@@ -207,7 +207,8 @@ jobs:
       - name: Сборка APK файла
         run: |
           cd enjoer_engine
-          export ANDROID_NDK_ROOT=/usr/local/lib/android/sdk/ndk/25.2.9519653
+          export ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/25.2.9519653
+          export ANDROID_SDK_ROOT=${ANDROID_HOME}
           cargo apk build --release
 
       - name: Выдача APK для скачивания
