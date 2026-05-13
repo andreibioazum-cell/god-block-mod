@@ -14,7 +14,7 @@ jobs:
           sudo rm -rf "/usr/local/share/boost"
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
-      - name: Генерация кода игры (Создание файлов)
+      - name: Генерация кода игры
         run: |
           mkdir enjoer_engine
           cd enjoer_engine
@@ -28,7 +28,6 @@ jobs:
           version = "7.0.0"
           edition = "2021"
 
-          # ИСПРАВЛЕНИЕ ОШИБКИ ЗДЕСЬ (Указали lib.rs)
           [lib]
           name = "enjoer_engine"
           path = "src/lib.rs"
@@ -44,6 +43,11 @@ jobs:
           min_sdk_version = 24
           target_sdk_version = 33
           strip = "strip"
+          fullscreen = true
+
+          # === ВОТ ЭТО ДЕЛАЕТ ИГРУ ГОРИЗОНТАЛЬНОЙ ===
+          [package.metadata.android.activity_attributes]
+          "android:screenOrientation" = "sensorLandscape"
 
           [package.metadata.android.signing.release]
           path = "release.keystore"
@@ -55,7 +59,6 @@ jobs:
           opt-level = 's'
           lto = false
           codegen-units = 16
-          debug = false
           EOF
           
           mkdir src
@@ -65,61 +68,227 @@ jobs:
           use bevy_egui::{egui, EguiContexts, EguiPlugin};
 
           #[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
-          enum GameState { #[default] MainMenu, Editor, Playtest }
+          enum GameState { #[default] MainMenu, Customize, Playtest }
 
-          #[derive(Component)] struct Player { velocity: f32, is_grounded: bool }
-          #[derive(Component)] struct GameBlock;
+          #[derive(Component)] struct Player;
+          #[derive(Component)] struct PlayerBodyPart;
+
+          #[derive(Resource)]
+          struct PlayerProfile {
+              ridix: u32,
+              inf_ridix: bool,
+              owns_fly: bool,
+              skin_col: [f32; 3],
+              torso_col: [f32; 3],
+              legs_col: [f32; 3],
+              hair_col: [f32; 3],
+              promo_input: String,
+          }
+
+          impl Default for PlayerProfile {
+              fn default() -> Self {
+                  Self {
+                      ridix: 150, inf_ridix: false, owns_fly: false,
+                      skin_col: [1.0, 0.82, 0.6], torso_col: [0.1, 0.4, 1.0],
+                      legs_col: [0.1, 0.8, 0.2], hair_col: [0.2, 0.15, 0.1],
+                      promo_input: "".to_string(),
+                  }
+              }
+          }
 
           #[derive(Resource, Default)]
           struct MobileControls {
               move_dir: Vec2,
               look_delta: Vec2,
               jump_pressed: bool,
-              place_pressed: bool,
-          }
-
-          #[derive(Resource)]
-          struct EditorSettings {
-              block_size: Vec3, block_color: Color, place_distance: f32,
-          }
-
-          impl Default for EditorSettings {
-              fn default() -> Self {
-                  Self { block_size: Vec3::splat(4.0), block_color: Color::srgb(0.3, 0.6, 1.0), place_distance: 12.0 }
-              }
           }
 
           #[bevy_main]
           fn main() {
               App::new()
                   .add_plugins(DefaultPlugins.set(WindowPlugin {
-                      primary_window: Some(Window { title: "Enjoer Engine 7.0".to_string(), fit_canvas_to_parent: true, ..default() }),
+                      primary_window: Some(Window { title: "Enjoer 7.0".to_string(), fit_canvas_to_parent: true, ..default() }),
                       ..default()
                   }))
                   .add_plugins(EguiPlugin)
                   .init_state::<GameState>()
-                  .init_resource::<EditorSettings>()
+                  .init_resource::<PlayerProfile>()
                   .init_resource::<MobileControls>()
                   .add_systems(Startup, setup_world)
-                  .add_systems(Update, touch_input_system)
+                  .add_systems(Update, apply_ui_style)
                   .add_systems(Update, ui_system)
-                  .add_systems(Update, (player_movement, camera_look).run_if(not(in_state(GameState::MainMenu))))
-                  .add_systems(Update, editor_placement.run_if(in_state(GameState::Editor)))
+                  .add_systems(Update, touch_input_system.run_if(in_state(GameState::Playtest)))
+                  .add_systems(Update, (player_movement, update_player_colors).run_if(in_state(GameState::Playtest)))
                   .run();
           }
 
           fn setup_world(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
               commands.spawn(PointLightBundle { transform: Transform::from_xyz(-5.0, 8.0, -8.0), ..default() });
-              commands.insert_resource(AmbientLight { color: Color::srgb(0.8, 0.9, 1.0), brightness: 150.0 });
+              commands.insert_resource(AmbientLight { color: Color::srgb(0.8, 0.9, 1.0), brightness: 250.0 });
+              
               commands.spawn(PbrBundle {
-                  mesh: meshes.add(Plane3d::default().mesh().size(800.0, 800.0)),
+                  mesh: meshes.add(Plane3d::default().mesh().size(100.0, 100.0)),
                   material: materials.add(StandardMaterial { base_color: Color::srgb(0.07, 0.12, 0.2), ..default() }),
                   ..default()
               });
+
+              commands.spawn(PbrBundle {
+                  mesh: meshes.add(Cuboid::new(8.0, 4.0, 8.0)),
+                  material: materials.add(Color::srgb(0.9, 0.2, 0.2)),
+                  transform: Transform::from_xyz(0.0, 2.0, -10.0),
+                  ..default()
+              });
+
               commands.spawn((
-                  Camera3dBundle { transform: Transform::from_xyz(0.0, 6.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y), ..default() },
-                  Player { velocity: 0.0, is_grounded: false },
-              ));
+                  SpatialBundle { transform: Transform::from_xyz(0.0, 4.0, 0.0), ..default() },
+                  Player,
+              )).with_children(|parent| {
+                  parent.spawn((PbrBundle {
+                      mesh: meshes.add(Cuboid::new(0.8, 1.6, 0.4)),
+                      material: materials.add(Color::WHITE),
+                      transform: Transform::from_xyz(0.0, -0.8, 0.0),
+                      ..default()
+                  }, PlayerBodyPart));
+                  
+                  parent.spawn((PbrBundle {
+                      mesh: meshes.add(Cuboid::new(1.0, 1.6, 0.5)),
+                      material: materials.add(Color::WHITE),
+                      transform: Transform::from_xyz(0.0, 0.8, 0.0),
+                      ..default()
+                  }, PlayerBodyPart));
+                  
+                  parent.spawn((PbrBundle {
+                      mesh: meshes.add(Cuboid::new(0.9, 0.9, 0.9)),
+                      material: materials.add(Color::WHITE),
+                      transform: Transform::from_xyz(0.0, 2.1, 0.0),
+                      ..default()
+                  }, PlayerBodyPart));
+
+                  parent.spawn(Camera3dBundle {
+                      transform: Transform::from_xyz(0.0, 3.5, 8.0).looking_at(Vec3::new(0.0, 1.5, 0.0), Vec3::Y),
+                      ..default()
+                  });
+              });
+          }
+
+          fn apply_ui_style(mut contexts: EguiContexts) {
+              let ctx = contexts.ctx_mut();
+              let mut visuals = egui::Visuals::dark();
+              visuals.window_fill = egui::Color32::from_rgb(2, 5, 10);
+              visuals.panel_fill = egui::Color32::from_rgb(2, 5, 10);
+              visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(2, 5, 10);
+              visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(0, 60, 100);
+              visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(0, 100, 150);
+              visuals.widgets.active.bg_fill = egui::Color32::from_rgb(0, 150, 200);
+              ctx.set_visuals(visuals);
+          }
+
+          fn ui_system(mut contexts: EguiContexts, state: Res<State<GameState>>, mut next_state: ResMut<NextState<GameState>>, mut profile: ResMut<PlayerProfile>, mut controls: ResMut<MobileControls>) {
+              let ctx = contexts.ctx_mut();
+              controls.jump_pressed = false;
+
+              let blue_text = egui::Color32::from_rgb(0, 191, 255);
+              let gold_text = egui::Color32::from_rgb(255, 215, 0);
+
+              match state.get() {
+                  GameState::MainMenu => {
+                      egui::CentralPanel::default().show(ctx, |ui| {
+                          ui.vertical_centered(|ui| {
+                              ui.add_space(30.0);
+                              ui.heading(egui::RichText::new("Enjoer").size(52.0).color(blue_text).strong());
+                              ui.heading(egui::RichText::new("Engine 7.0").size(18.0).color(egui::Color32::from_rgb(0, 136, 204)));
+                              
+                              ui.add_space(20.0);
+                              let ridix_str = if profile.inf_ridix { "∞".into() } else { profile.ridix.to_string() };
+                              ui.label(egui::RichText::new(format!("Ridix: {}", ridix_str)).size(20.0).color(gold_text));
+
+                              ui.add_space(20.0);
+                              ui.horizontal(|ui| {
+                                  ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                      if ui.add_sized([240.0, 60.0], egui::Button::new(egui::RichText::new("Play").size(20.0).color(blue_text))).clicked() { next_state.set(GameState::Playtest); }
+                                      ui.add_space(15.0);
+                                      if ui.add_sized([240.0, 60.0], egui::Button::new(egui::RichText::new("Customize").size(20.0).color(blue_text))).clicked() { next_state.set(GameState::Customize); }
+                                  });
+                              });
+                          });
+                      });
+                  }
+                  GameState::Customize => {
+                      egui::CentralPanel::default().show(ctx, |ui| {
+                          egui::ScrollArea::vertical().show(ui, |ui| {
+                              ui.vertical_centered(|ui| {
+                                  ui.heading(egui::RichText::new("Customize").size(26.0).color(blue_text));
+                                  let ridix_str = if profile.inf_ridix { "∞".into() } else { profile.ridix.to_string() };
+                                  ui.label(egui::RichText::new(format!("Ridix: {}", ridix_str)).color(gold_text));
+                              });
+
+                              ui.separator();
+                              ui.horizontal(|ui| {
+                                  ui.label(egui::RichText::new("Promo code:").color(egui::Color32::WHITE).strong());
+                                  ui.text_edit_singleline(&mut profile.promo_input);
+                                  if ui.button("Apply").clicked() {
+                                      if profile.promo_input == "Dimasi4ek229" { profile.inf_ridix = true; }
+                                      profile.promo_input.clear();
+                                  }
+                              });
+
+                              ui.separator();
+                              ui.label(egui::RichText::new("Character colors").color(egui::Color32::WHITE).strong());
+                              ui.horizontal(|ui| {
+                                  ui.label("Skin"); ui.color_edit_button_rgb(&mut profile.skin_col);
+                                  ui.label("Torso"); ui.color_edit_button_rgb(&mut profile.torso_col);
+                                  ui.label("Legs"); ui.color_edit_button_rgb(&mut profile.legs_col);
+                                  ui.label("Hair"); ui.color_edit_button_rgb(&mut profile.hair_col);
+                              });
+
+                              ui.separator();
+                              ui.horizontal(|ui| {
+                                  ui.label(egui::RichText::new("Animation packs: Fly pack").color(egui::Color32::WHITE).strong());
+                                  if profile.owns_fly { ui.label(egui::RichText::new("Owned").color(egui::Color32::GREEN)); } 
+                                  else {
+                                      if ui.button("Buy (50 Ridix)").clicked() && (profile.inf_ridix || profile.ridix >= 50) {
+                                          if !profile.inf_ridix { profile.ridix -= 50; }
+                                          profile.owns_fly = true;
+                                      }
+                                  }
+                              });
+
+                              ui.add_space(20.0);
+                              ui.vertical_centered(|ui| {
+                                  if ui.add_sized([200.0, 50.0], egui::Button::new(egui::RichText::new("Back").size(18.0).color(blue_text))).clicked() { next_state.set(GameState::MainMenu); }
+                              });
+                          });
+                      });
+                  }
+                  GameState::Playtest => {
+                      // Прозрачные панели, чтобы игра была на весь экран
+                      let frame = egui::Frame::none();
+                      egui::TopBottomPanel::top("pt_top").frame(frame).show(ctx, |ui| { 
+                          ui.horizontal(|ui| {
+                              ui.add_space(20.0);
+                              if ui.add_sized([80.0, 40.0], egui::Button::new(egui::RichText::new("Stop").color(egui::Color32::RED))).clicked() { next_state.set(GameState::MainMenu); } 
+                          });
+                      });
+                      
+                      egui::TopBottomPanel::bottom("pt_bot").frame(frame).show(ctx, |ui| {
+                          ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { 
+                              ui.add_space(40.0);
+                              if ui.add_sized([110.0, 90.0], egui::Button::new(egui::RichText::new("JUMP").size(20.0).strong())).clicked() { controls.jump_pressed = true; } 
+                          });
+                          ui.add_space(20.0);
+                      });
+                  }
+              }
+          }
+
+          fn update_player_colors(profile: Res<PlayerProfile>, q_parts: Query<(&mut Handle<StandardMaterial>, &Transform), With<PlayerBodyPart>>, mut materials: ResMut<Assets<StandardMaterial>>) {
+              for (mat_handle, transform) in q_parts.iter() {
+                  if let Some(mat) = materials.get_mut(mat_handle) {
+                      if transform.translation.y > 2.0 { mat.base_color = Color::srgb(profile.skin_col[0], profile.skin_col[1], profile.skin_col[2]); }
+                      else if transform.translation.y > 0.0 { mat.base_color = Color::srgb(profile.torso_col[0], profile.torso_col[1], profile.torso_col[2]); }
+                      else { mat.base_color = Color::srgb(profile.legs_col[0], profile.legs_col[1], profile.legs_col[2]); }
+                  }
+              }
           }
 
           fn touch_input_system(touches: Res<Touches>, q_windows: Query<&Window, With<PrimaryWindow>>, mut controls: ResMut<MobileControls>) {
@@ -127,6 +296,7 @@ jobs:
               if let Ok(window) = q_windows.get_single() {
                   let w = window.width();
                   for touch in touches.iter() {
+                      // В горизонтальном режиме экран делится ровно пополам (ширина экрана)
                       if touch.position().x < w / 2.0 {
                           let delta = touch.position() - touch.start_position();
                           controls.move_dir = (delta / 80.0).clamp_length_max(1.0);
@@ -136,74 +306,16 @@ jobs:
               }
           }
 
-          fn ui_system(mut contexts: EguiContexts, state: Res<State<GameState>>, mut next_state: ResMut<NextState<GameState>>, mut controls: ResMut<MobileControls>) {
-              let ctx = contexts.ctx_mut();
-              controls.jump_pressed = false; controls.place_pressed = false;
-
-              match state.get() {
-                  GameState::MainMenu => {
-                      egui::CentralPanel::default().show(ctx, |ui| {
-                          ui.vertical_centered(|ui| {
-                              ui.heading("Enjoer Engine 7.0 (Rust)");
-                              ui.add_space(50.0);
-                              if ui.add_sized([200.0, 60.0], egui::Button::new("Playtest")).clicked() { next_state.set(GameState::Playtest); }
-                              ui.add_space(20.0);
-                              if ui.add_sized([200.0, 60.0], egui::Button::new("Editor")).clicked() { next_state.set(GameState::Editor); }
-                          });
-                      });
+          fn player_movement(time: Res<Time>, controls: Res<MobileControls>, mut q_player: Query<&mut Transform, With<Player>>) {
+              for mut transform in q_player.iter_mut() {
+                  if controls.look_delta.x != 0.0 {
+                      let yaw = -controls.look_delta.x * 0.01;
+                      transform.rotate_y(yaw);
                   }
-                  GameState::Editor => {
-                      egui::TopBottomPanel::top("editor_top").show(ctx, |ui| {
-                          ui.horizontal(|ui| {
-                              if ui.button("Menu").clicked() { next_state.set(GameState::MainMenu); }
-                              if ui.button("Play").clicked() { next_state.set(GameState::Playtest); }
-                          });
-                      });
-                      egui::TopBottomPanel::bottom("editor_bottom").show(ctx, |ui| {
-                          ui.vertical_centered(|ui| { if ui.add_sized([150.0, 60.0], egui::Button::new("PLACE BLOCK")).clicked() { controls.place_pressed = true; } });
-                      });
-                  }
-                  GameState::Playtest => {
-                      egui::TopBottomPanel::top("pt_top").show(ctx, |ui| { if ui.button("Stop").clicked() { next_state.set(GameState::Editor); } });
-                      egui::TopBottomPanel::bottom("pt_bot").show(ctx, |ui| {
-                          ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| { if ui.add_sized([100.0, 80.0], egui::Button::new("JUMP")).clicked() { controls.jump_pressed = true; } });
-                      });
-                  }
-              }
-          }
-
-          fn camera_look(mut q_camera: Query<&mut Transform, With<Camera>>, controls: Res<MobileControls>) {
-              if controls.look_delta != Vec2::ZERO {
-                  let mut transform = q_camera.single_mut();
-                  let (mut yaw, mut pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
-                  yaw -= controls.look_delta.x * 0.005; pitch -= controls.look_delta.y * 0.005; pitch = pitch.clamp(-1.5, 1.5);
-                  transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
-              }
-          }
-
-          fn player_movement(time: Res<Time>, controls: Res<MobileControls>, mut q_player: Query<(&mut Transform, &mut Player)>) {
-              for (mut transform, mut player) in q_player.iter_mut() {
                   let forward = transform.forward(); let right = transform.right();
                   let mut direction = forward * controls.move_dir.y + right * controls.move_dir.x;
                   direction.y = 0.0; if direction.length_squared() > 0.0 { direction = direction.normalize(); }
-                  if transform.translation.y <= 2.0 { transform.translation.y = 2.0; player.is_grounded = true; player.velocity = 0.0;
-                  } else { player.is_grounded = false; player.velocity -= 15.0 * time.delta_seconds(); }
-                  if controls.jump_pressed && player.is_grounded { player.velocity = 8.0; }
-                  transform.translation += direction * 10.0 * time.delta_seconds(); transform.translation.y += player.velocity * time.delta_seconds();
-              }
-          }
-
-          fn editor_placement(controls: Res<MobileControls>, editor: Res<EditorSettings>, q_camera: Query<&Transform, With<Camera>>, mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
-              if controls.place_pressed {
-                  if let Ok(cam_transform) = q_camera.get_single() {
-                      let forward = cam_transform.forward();
-                      let mut p = cam_transform.translation + forward * editor.place_distance;
-                      if p.y - (editor.block_size.y / 2.0) < 0.0 { p.y = editor.block_size.y / 2.0; }
-                      commands.spawn((
-                          PbrBundle { mesh: meshes.add(Cuboid::new(editor.block_size.x, editor.block_size.y, editor.block_size.z)), material: materials.add(editor.block_color), transform: Transform::from_translation(p), ..default() },
-                          GameBlock,
-                      ));
-                  }
+                  transform.translation += direction * 10.0 * time.delta_seconds();
               }
           }
           EOF
@@ -224,8 +336,7 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      # УСКОРЕНИЕ СБОРКИ: Кешируем движок
-      - name: Кеширование зависимостей Rust
+      - name: Кеширование зависимостей
         uses: Swatinem/rust-cache@v2
         with:
           work-dir: enjoer_engine
