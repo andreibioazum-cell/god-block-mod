@@ -7,38 +7,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Освобождение памяти на сервере (Фикс вылета OOM)
+      - name: Освобождение памяти на сервере
         run: |
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf "/usr/local/share/boost"
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
 
-      - name: Установка Java для Android
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Установка Android NDK и SDK
-        run: |
-          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses
-          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" "platforms;android-30" "platforms;android-33" "build-tools;33.0.2" "build-tools;30.0.3"
-
-      - name: Установка Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
-
-      - name: Установка сборщика APK (cargo-apk)
-        run: cargo install cargo-apk
-
-      - name: Генерация кода игры и цифрового ключа (Keystore)
+      - name: Генерация кода игры (Создание файлов)
         run: |
           mkdir enjoer_engine
           cd enjoer_engine
           
-          # Генерируем сертификат подписи для Android
+          # Генерируем ключ
           keytool -genkey -v -keystore release.keystore -alias mykey -keyalg RSA -keysize 2048 -validity 10000 -storepass password -keypass password -dname "CN=Enjoer,O=Enjoer,C=US"
           
           cat << 'EOF' > Cargo.toml
@@ -47,9 +28,10 @@ jobs:
           version = "7.0.0"
           edition = "2021"
 
+          # ИСПРАВЛЕНИЕ ОШИБКИ ЗДЕСЬ (Указали lib.rs)
           [lib]
           name = "enjoer_engine"
-          path = "src/main.rs"
+          path = "src/lib.rs"
           crate-type = ["cdylib"]
 
           [dependencies]
@@ -63,7 +45,6 @@ jobs:
           target_sdk_version = 33
           strip = "strip"
 
-          # Настройки подписи APK-файла
           [package.metadata.android.signing.release]
           path = "release.keystore"
           keystore_password = "password"
@@ -74,10 +55,11 @@ jobs:
           opt-level = 's'
           lto = false
           codegen-units = 16
+          debug = false
           EOF
           
           mkdir src
-          cat << 'EOF' > src/main.rs
+          cat << 'EOF' > src/lib.rs
           use bevy::prelude::*;
           use bevy::window::PrimaryWindow;
           use bevy_egui::{egui, EguiContexts, EguiPlugin};
@@ -225,6 +207,31 @@ jobs:
               }
           }
           EOF
+
+      - name: Установка Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Установка Android NDK и SDK
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" "platforms;android-30" "platforms;android-33" "build-tools;33.0.2" "build-tools;30.0.3"
+
+      - name: Установка Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      # УСКОРЕНИЕ СБОРКИ: Кешируем движок
+      - name: Кеширование зависимостей Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          work-dir: enjoer_engine
+
+      - name: Установка сборщика APK
+        run: cargo install cargo-apk
 
       - name: Сборка APK файла
         run: |
