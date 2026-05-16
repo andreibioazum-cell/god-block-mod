@@ -17,7 +17,7 @@ jobs:
           [bits 16]
           [org 0x7c00]
           start:
-              mov ax, 0x0003
+              mov ax, 0x0003   ; Очистить экран
               int 0x10
               mov si, msg_boot
               call print
@@ -26,21 +26,26 @@ jobs:
               call print
               mov di, buffer
               call get_string
+              
               mov si, buffer
               mov di, cmd_help
               call strcmp
               jz .help
+              
               mov si, buffer
               mov di, cmd_cls
               call strcmp
               jz start
+              
               mov si, msg_err
               call print
               jmp shell
+
           .help:
               mov si, msg_help
               call print
               jmp shell
+
           strcmp:
           .l: mov al, [si]
               mov bl, [di]
@@ -51,9 +56,11 @@ jobs:
               inc si
               inc di
               jmp .l
-          .e: ret
-          .ne: add sp, 2 ; Выход из call
+          .e: mov al, 1 ; ZF=1
               ret
+          .ne: mov al, 0 ; ZF=0
+              ret
+
           get_string:
               xor cx, cx
           .l: mov ah, 0x00
@@ -71,6 +78,7 @@ jobs:
               mov al, 10
               int 0x10
               ret
+
           print:
               lodsb
               or al, al
@@ -79,13 +87,15 @@ jobs:
               int 0x10
               jmp print
           .d: ret
-          msg_boot db 'Terminal OS v8.0', 13, 10, 0
+
+          msg_boot   db 'DimOS v9.0 Terminal Ready', 13, 10, 0
           msg_prompt db '> ', 0
-          msg_help db 'Commands: help, cls', 13, 10, 0
-          msg_err db 'Unknown!', 13, 10, 0
-          cmd_help db 'help', 0
-          cmd_cls db 'cls', 0
-          buffer db 0,0,0,0,0,0,0,0,0,0
+          msg_help   db 'Available: help, cls', 13, 10, 0
+          msg_err    db 'Unknown command!', 13, 10, 0
+          cmd_help   db 'help', 0
+          cmd_cls    db 'cls', 0
+          buffer     db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+          
           times 510-($-$$) db 0
           dw 0xAA55
           KERNEL
@@ -97,22 +107,16 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android Project
+      - name: Setup Android Project Structure
         run: |
-          # Создаем папки по одной для надежности
-          mkdir -p app/src/main
-          mkdir -p app/src/main/java/com/tinyos/vm
-          mkdir -p app/src/main/res/layout
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/assets
-          
+          mkdir -p app/src/main/java/com/tinyos/vm app/src/main/res/layout app/src/main/res/values app/src/main/assets
           cp kernel.bin app/src/main/assets/kernel.bin
 
           cat > app/src/main/AndroidManifest.xml << 'XML'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.tinyos.vm">
-              <application android:label="TinyOS Terminal" android:theme="@style/Theme.AppCompat.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="stateVisible">
+              <application android:label="DimOS VM" android:theme="@style/Theme.AppCompat.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="stateAlwaysVisible">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -123,14 +127,14 @@ jobs:
           XML
 
           cat > app/src/main/res/values/strings.xml << 'XML'
-          <resources><string name="app_name">TinyOS</string></resources>
+          <resources><string name="app_name">DimOS VM</string></resources>
           XML
 
           cat > app/src/main/res/layout/activity_main.xml << 'XML'
           <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent" android:layout_height="match_parent" android:background="#000">
               <SurfaceView android:id="@+id/s" android:layout_width="match_parent" android:layout_height="match_parent" />
-              <EditText android:id="@+id/e" android:layout_width="0dp" android:layout_height="0dp" android:inputType="text" />
+              <EditText android:id="@+id/e" android:layout_width="0dp" android:layout_height="0dp" android:inputType="textNoSuggestions" android:focusable="true"/>
           </RelativeLayout>
           XML
 
@@ -153,10 +157,11 @@ jobs:
                   emu = new X86Emulator();
                   EditText et = findViewById(R.id.e);
                   et.requestFocus();
-                  et.setOnKeyListener((v, k, e) -> {
-                      if(e.getAction()==KeyEvent.ACTION_DOWN) {
-                          char c = (char)e.getUnicodeChar();
+                  et.setOnKeyListener((v, k, event) -> {
+                      if(event.getAction()==KeyEvent.ACTION_DOWN) {
+                          char c = (char)event.getUnicodeChar();
                           if(k==KeyEvent.KEYCODE_ENTER) c = (char)13;
+                          if(k==KeyEvent.KEYCODE_DEL) c = (char)8;
                           if(c != 0) keys.add(c);
                       }
                       return false;
@@ -166,10 +171,10 @@ jobs:
                       public void surfaceCreated(SurfaceHolder h) {
                           new Thread(() -> {
                               while(true) {
-                                  for(int i=0; i<500; i++) emu.step();
+                                  for(int i=0; i<1000; i++) emu.step();
                                   Canvas c = h.lockCanvas();
                                   if(c!=null) { emu.draw(c); h.unlockCanvasAndPost(c); }
-                                  try { Thread.sleep(20); } catch(Exception ex) {}
+                                  try { Thread.sleep(16); } catch(Exception ex) {}
                               }
                           }).start();
                       }
@@ -179,23 +184,35 @@ jobs:
               }
               class X86Emulator {
                   byte[] m = new byte[65536];
-                  int ax, si, di, ip=0x7C00;
+                  int ax, si, di, ip=0x7C00, sp=0x9000;
+                  boolean zf = false;
                   List<String> lines = new ArrayList<>(Arrays.asList(""));
                   X86Emulator() { try { getAssets().open("kernel.bin").read(m, 0x7C00, 512); } catch(Exception e){} }
+                  
+                  void push(int val) { m[--sp] = (byte)(val>>8); m[--sp] = (byte)(val&0xFF); }
+                  int pop() { return (m[sp++]&0xFF) | ((m[sp++]&0xFF)<<8); }
+
                   void step() {
                       int op = m[ip] & 0xFF;
-                      if(op==0xB4) { ax=(ax&0xFF)|((m[ip+1]&0xFF)<<8); ip+=2; }
+                      if(op==0xB8) { ax=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); ip+=3; }
+                      else if(op==0xB4) { ax=(ax&0xFF)|((m[ip+1]&0xFF)<<8); ip+=2; }
                       else if(op==0xB0) { ax=(ax&0xFF00)|(m[ip+1]&0xFF); ip+=2; }
                       else if(op==0xBE) { si=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); ip+=3; }
                       else if(op==0xBF) { di=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); ip+=3; }
                       else if(op==0xAC) { ax=(ax&0xFF00)|(m[si]&0xFF); si++; ip++; }
+                      else if(op==0xE8) { int rel=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); push(ip+3); ip+=3+rel; }
+                      else if(op==0xC3) { ip=pop(); }
+                      else if(op==0x3C) { zf=(ax&0xFF)==(m[ip+1]&0xFF); ip+=2; }
+                      else if(op==0x74) { if(zf) ip+=(byte)m[ip+1]+2; else ip+=2; }
                       else if(op==0xCD) {
                           int n=m[ip+1]&0xFF;
                           if(n==0x10) {
-                              if(((ax>>8)&0xFF)==0x0E) {
+                              int ah=(ax>>8)&0xFF;
+                              if(ah==0x0E) {
                                   char c=(char)(ax&0xFF);
-                                  if(c==13) lines.add(""); else lines.set(lines.size()-1, lines.get(lines.size()-1)+c);
-                              } else { lines.clear(); lines.add(""); }
+                                  if(c==13) lines.add(""); else if(c>=32) lines.set(lines.size()-1, lines.get(lines.size()-1)+c);
+                                  if(lines.size()>20) lines.remove(0);
+                              } else if(ah==0) { lines.clear(); lines.add(""); }
                           } else if(n==0x16) {
                               if(keys.isEmpty()) return;
                               ax=(ax&0xFF00)|keys.poll();
@@ -206,7 +223,8 @@ jobs:
                   void draw(Canvas c) {
                       c.drawColor(Color.BLACK);
                       Paint p = new Paint(); p.setColor(Color.GREEN); p.setTextSize(40);
-                      for(int i=0; i<lines.size(); i++) c.drawText(lines.get(i), 20, 60+i*50, p);
+                      p.setTypeface(Typeface.MONOSPACE);
+                      for(int i=0; i<lines.size(); i++) c.drawText(lines.get(i) + (i==lines.size()-1?"_":""), 20, 60+i*50, p);
                   }
               }
           }
@@ -220,11 +238,7 @@ jobs:
           XML
           cat > app/build.gradle << 'XML'
           plugins { id 'com.android.application' }
-          android {
-              namespace 'com.tinyos.vm'
-              compileSdk 34
-              defaultConfig { applicationId "com.tinyos.vm"; minSdk 24; targetSdk 34; versionCode 1; versionName "1.0" }
-          }
+          android { namespace 'com.tinyos.vm'; compileSdk 34; defaultConfig { applicationId "com.tinyos.vm"; minSdk 24; targetSdk 34; versionCode 1; versionName "9.0" } }
           dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
           XML
 
@@ -239,5 +253,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: TinyOS-Terminal
+          name: DimOS-v9-Fixed
           path: app/build/outputs/apk/debug/app-debug.apk
