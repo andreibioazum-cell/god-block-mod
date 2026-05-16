@@ -1,4 +1,4 @@
-name: TinyOS v18 Focus Fix
+name: TinyOS v22 FileSystem
 
 on: [push, workflow_dispatch]
 
@@ -16,46 +16,165 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y nasm
 
 # ==============================
-# СБОРКА ЯДРА (SHELL)
+# СБОРКА ОБРАЗА ДИСКА (BOOT + KERNEL)
 # ==============================
       - name: Build OS Image
         run: |
           cat > kernel.asm << 'EOF'
           [bits 16]
           [org 0x7c00]
-          
-          start:
-              mov ax, 0x0003
-              int 0x10
+          ; --- BOOTLOADER ---
+          jmp 0:boot_start
+          boot_start:
+              mov ax, 0x1000
+              mov es, ax
+              xor bx, bx
+              mov ah, 0x02
+              mov al, 20
+              mov ch, 0
+              mov cl, 2
+              mov dh, 0
+              int 0x13
+              jmp 0x1000:0000
+
+          times 510-($-$$) db 0
+          dw 0xAA55
+
+          ; --- KERNEL ---
+          kernel_entry:
+              push cs
+              pop ds
               mov si, msg_welcome
               call print
-
           shell:
               mov si, msg_prompt
               call print
               mov di, buffer
               call get_string
               
+              ; ПРОВЕРКА КОМАНД
               mov si, buffer
-              mov di, cmd_help
-              call strcmp
-              jz .help
-              
+              mov di, cmd_ls
+              call strcmp_fixed
+              jz do_ls
+
+              mov si, buffer
+              mov di, cmd_touch
+              call strcmp_prefix
+              jz do_touch
+
+              mov si, buffer
+              mov di, cmd_rm
+              call strcmp_prefix
+              jz do_rm
+
+              mov si, buffer
+              mov di, cmd_start
+              call strcmp_prefix
+              jz do_start
+
               mov si, buffer
               mov di, cmd_cls
-              call strcmp
-              jz start
+              call strcmp_fixed
+              jz 0x7C00
 
               mov si, msg_err
               call print
               jmp shell
 
-          .help:
-              mov si, msg_help
+          ; --- ФАЙЛОВЫЕ ОПЕРАЦИИ ---
+          do_ls:
+              mov si, file_list_header
+              call print
+              mov bx, file_table
+          .loop:
+              mov al, [bx]
+              or al, al
+              jz .next
+              mov si, bx
+              call print
+              mov si, msg_space
+              call print
+          .next:
+              add bx, 16
+              cmp bx, file_table + 80
+              jl .loop
+              mov si, msg_nl
               call print
               jmp shell
 
-          strcmp:
+          do_touch:
+              mov si, buffer + 6 ; Пропустить "touch "
+              mov bx, file_table
+          .find_slot:
+              mov al, [bx]
+              or al, al
+              jz .found
+              add bx, 16
+              cmp bx, file_table + 80
+              jge .full
+              jmp .find_slot
+          .found:
+              mov di, bx
+          .copy:
+              lodsb
+              stosb
+              or al, al
+              jnz .copy
+              mov si, msg_done
+              call print
+              jmp shell
+          .full:
+              mov si, msg_full
+              call print
+              jmp shell
+
+          do_rm:
+              mov si, buffer + 3 ; Пропустить "rm "
+              call find_file
+              jc .not_found
+              mov byte [bx], 0 ; Удалить (обнулить первый байт имени)
+              mov si, msg_done
+              call print
+              jmp shell
+          .not_found:
+              mov si, msg_err
+              call print
+              jmp shell
+
+          do_start:
+              mov si, buffer + 6 ; Пропустить "start "
+              call find_file
+              jc .not_found
+              mov si, msg_starting
+              call print
+              ; Тут мы могли бы прыгнуть на код файла
+              ; Но пока просто имитируем запуск
+              jmp shell
+          .not_found:
+              mov si, msg_err
+              call print
+              jmp shell
+
+          find_file:
+              mov bx, file_table
+          .loop:
+              push si
+              mov di, bx
+              call strcmp_fixed
+              pop si
+              jz .found
+              add bx, 16
+              cmp bx, file_table + 80
+              jl .loop
+              stc ; Не найден
+              ret
+          .found:
+              clc ; Найден, адрес в BX
+              ret
+
+          ; --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+          strcmp_fixed:
           .l: mov al, [si]
               mov bl, [di]
               cmp al, bl
@@ -65,9 +184,22 @@ jobs:
               inc si
               inc di
               jmp .l
-          .e: mov al, 1
+          .e: ret
+          .ne: add sp, 2
               ret
-          .ne: mov al, 0
+
+          strcmp_prefix: ; Проверка начала строки
+          .l: mov al, [di]
+              or al, al
+              jz .e
+              mov bl, [si]
+              cmp al, bl
+              jne .ne
+              inc si
+              inc di
+              jmp .l
+          .e: ret
+          .ne: add sp, 2
               ret
 
           get_string:
@@ -97,16 +229,25 @@ jobs:
               jmp print
           .d: ret
 
-          msg_welcome db 'DimOS v18.0 (Keyboard Fixed)', 13, 10, 'Type help', 13, 10, 0
-          msg_prompt  db 'OS> ', 0
-          msg_help    db 'Commands: help, cls', 13, 10, 0
-          msg_err     db 'Bad command!', 13, 10, 0
-          cmd_help    db 'help', 0
-          cmd_cls     db 'cls', 0
-          buffer      times 16 db 0
+          msg_welcome db 'DimOS Termux v22.0 - Virtual FS', 13, 10, 'Usage: touch [name], ls, rm [name]', 13, 10, 0
+          msg_prompt  db '~ $ ', 0
+          file_list_header db 'Files in /home:', 13, 10, 0
+          msg_space   db '  ', 0
+          msg_nl      db 13, 10, 0
+          msg_done    db 'OK', 13, 10, 0
+          msg_full    db 'Error: Disk full', 13, 10, 0
+          msg_starting db 'Executing program...', 13, 10, 0
+          msg_err     db 'Error: Not found', 13, 10, 0
+          cmd_ls      db 'ls', 0
+          cmd_touch   db 'touch ', 0
+          cmd_rm      db 'rm ', 0
+          cmd_start   db 'start ', 0
+          cmd_cls      db 'cls', 0
           
-          times 510-($-$$) db 0
-          dw 0xAA55
+          file_table: times 80 db 0 ; 5 слотов по 16 байт
+          buffer     times 32 db 0
+          
+          times 8192-($-$$) db 0
           EOF
           nasm -f bin kernel.asm -o kernel.img
 
@@ -121,8 +262,8 @@ jobs:
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.tinyos.vm">
-              <application android:label="TinyOS v18" android:theme="@style/Theme.AppCompat.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="landscape">
+              <application android:label="TinyOS" android:theme="@style/Theme.AppCompat.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -135,14 +276,8 @@ jobs:
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent" android:layout_height="match_parent" android:background="#000">
-              <SurfaceView android:id="@+id/s" android:layout_width="match_parent" android:layout_height="match_parent" 
-                  android:focusable="false" android:clickable="true" />
-              <EditText android:id="@+id/e" 
-                  android:layout_width="1dp" android:layout_height="1dp" 
-                  android:alpha="0" android:focusable="true" 
-                  android:focusableInTouchMode="true" android:inputType="textNoSuggestions" />
-              <Button android:id="@+id/bk" android:layout_width="wrap_content" android:layout_height="wrap_content" 
-                  android:text="OPEN KEYBOARD" android:layout_alignParentBottom="true" android:layout_centerHorizontal="true"/>
+              <SurfaceView android:id="@+id/s" android:layout_width="match_parent" android:layout_height="match_parent" />
+              <EditText android:id="@+id/e" android:layout_width="1dp" android:layout_height="1dp" android:alpha="0" android:focusable="true" android:focusableInTouchMode="true" android:inputType="textNoSuggestions" android:imeOptions="flagNoExtractUi" />
           </RelativeLayout>
           EOF
 
@@ -155,6 +290,7 @@ jobs:
           import android.widget.*;
           import androidx.appcompat.app.AppCompatActivity;
           import java.util.*;
+          import java.io.*;
 
           public class MainActivity extends AppCompatActivity {
               X86Emulator emu;
@@ -166,26 +302,21 @@ jobs:
                   setContentView(R.layout.activity_main);
                   emu = new X86Emulator();
                   EditText et = findViewById(R.id.e);
-                  Button btn = findViewById(R.id.bk);
                   SurfaceView sv = findViewById(R.id.s);
                   
-                  et.setOnKeyListener((v, k, event) -> {
-                      if(event.getAction()==KeyEvent.ACTION_DOWN) {
-                          char c = (char)event.getUnicodeChar();
-                          if(k==KeyEvent.KEYCODE_ENTER) c = (char)13;
-                          if(c != 0) keys.add(c);
-                      }
-                      return false;
+                  sv.setOnClickListener(v -> {
+                      et.requestFocus();
+                      ((InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(et, InputMethodManager.SHOW_IMPLICIT);
                   });
 
-                  View.OnClickListener openKB = v -> {
-                      et.requestFocus();
-                      InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-                      imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0);
-                  };
-
-                  btn.setOnClickListener(openKB);
-                  sv.setOnClickListener(openKB);
+                  et.setOnKeyListener((v, k, event) -> {
+                      if(event.getAction()==KeyEvent.ACTION_DOWN) {
+                          int unicode = event.getUnicodeChar();
+                          if (unicode != 0) keys.add((char)unicode);
+                          else if (k == KeyEvent.KEYCODE_ENTER) keys.add((char)13);
+                      }
+                      return true;
+                  });
 
                   sv.getHolder().addCallback(new SurfaceHolder.Callback() {
                       public void surfaceCreated(SurfaceHolder h) {
@@ -204,26 +335,43 @@ jobs:
               }
 
               class X86Emulator {
-                  byte[] m = new byte[65536];
-                  int ax, si, ip=0x7C00, sp=0x9000;
+                  byte[] m = new byte[128 * 1024];
+                  int ax, bx, cx, dx, si, di, ip=0x7C00, sp=0x9000, cs=0, es=0;
                   boolean zf = false;
                   List<String> lines = new ArrayList<>(Arrays.asList(""));
 
-                  X86Emulator() { try { getAssets().open("kernel.img").read(m, 0x7C00, 512); } catch(Exception e){} }
+                  X86Emulator() {
+                      try {
+                          InputStream is = getAssets().open("kernel.img");
+                          is.read(m, 0x7C00, is.available());
+                      } catch(Exception e){}
+                  }
                   
                   void step() {
-                      int op = m[ip] & 0xFF;
+                      int absIp = (cs << 4) + ip;
+                      int op = m[absIp] & 0xFF;
                       switch(op) {
-                          case 0xB8: ax=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); ip+=3; break;
-                          case 0xB4: ax=(ax&0xFF)|((m[ip+1]&0xFF)<<8); ip+=2; break;
-                          case 0xB0: ax=(ax&0xFF00)|(m[ip+1]&0xFF); ip+=2; break;
-                          case 0xBE: si=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); ip+=3; break;
-                          case 0xAC: ax=(ax&0xFF00)|(m[si]&0xFF); si++; ip++; break;
-                          case 0xE8: int r=ip+3; m[--sp]=(byte)(r>>8); m[--sp]=(byte)r; ip+=3+((m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8)); break;
+                          case 0xB8: ax=(m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8); ip+=3; break;
+                          case 0xB4: ax=(ax&0xFF)|((m[absIp+1]&0xFF)<<8); ip+=2; break;
+                          case 0xB0: ax=(ax&0xFF00)|(m[absIp+1]&0xFF); ip+=2; break;
+                          case 0xBB: bx=(m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8); ip+=3; break;
+                          case 0xB9: cx=(m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8); ip+=3; break;
+                          case 0xBE: si=(m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8); ip+=3; break;
+                          case 0xBF: di=(m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8); ip+=3; break;
+                          case 0xAC: ax=(ax&0xFF00)|(m[(cs<<4)+si]&0xFF); si++; ip++; break;
+                          case 0xAA: m[(es<<4)+di]=(byte)(ax&0xFF); di++; ip++; break;
+                          case 0xE8: int r=ip+3; m[--sp]=(byte)(r>>8); m[--sp]=(byte)r; ip+=3+((m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8)); break;
                           case 0xC3: ip=(m[sp++]&0xFF)|((m[sp++]&0xFF)<<8); break;
-                          case 0x3C: zf=(ax&0xFF)==(m[ip+1]&0xFF); ip+=2; break; 
-                          case 0x74: if(zf) ip+=(byte)m[ip+1]+2; else ip+=2; break;
-                          case 0xCD: handleInt(m[ip+1]&0xFF); ip+=2; break;
+                          case 0x3C: zf=(ax&0xFF)==(m[absIp+1]&0xFF); ip+=2; break; 
+                          case 0x74: if(zf) ip+=(byte)m[absIp+1]+2; else ip+=2; break;
+                          case 0x81: if(m[absIp+1]==(byte)0xFB) { bx+=(m[absIp+2]&0xFF)|((m[absIp+3]&0xFF)<<8); ip+=4; } else ip++; break; // add bx, imm16
+                          case 0x83: if(m[absIp+1]==(byte)0xC3) { bx+=(m[absIp+2]); ip+=3; } else ip++; break; // add bx, imm8
+                          case 0xCD: handleInt(m[absIp+1]&0xFF); ip+=2; break;
+                          case 0xEA: ip=(m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8); cs=(m[absIp+3]&0xFF)|((m[absIp+4]&0xFF)<<8); break;
+                          case 0x8A: ax=(ax&0xFF00)|(m[(cs<<4)+si]&0xFF); ip+=2; break; // mov al, [si]
+                          case 0x38: zf=(ax&0xFF)==(bx&0xFF); ip+=2; break; // cmp al, bl
+                          case 0x46: si++; ip++; break;
+                          case 0x47: di++; ip++; break;
                           default: ip++; break;
                       }
                   }
@@ -233,40 +381,30 @@ jobs:
                           if(((ax>>8)&0xFF)==0x0E) {
                               char c=(char)(ax&0xFF);
                               if(c==13) lines.add(""); else if(c>=32) lines.set(lines.size()-1, lines.get(lines.size()-1)+c);
-                              if(lines.size()>18) lines.remove(0);
+                              if(lines.size()>30) lines.remove(0);
                           } else { lines.clear(); lines.add(""); }
                       } else if(n==0x16) {
                           if(!keys.isEmpty()) ax=(ax&0xFF00)|keys.poll(); else ip-=2;
+                      } else if(n==0x13) {
+                          int count = ax & 0xFF;
+                          int sector = (m[ip-1] & 0xFF);
+                          // Имитируем чтение диска в память
+                          System.arraycopy(m, 0, m, 0x10000, count*512);
                       }
                   }
 
                   void draw(Canvas c) {
                       c.drawColor(Color.BLACK);
-                      Paint p = new Paint(); p.setColor(Color.GREEN); p.setTextSize(35);
-                      p.setTypeface(Typeface.MONOSPACE);
-                      for(int i=0; i<lines.size(); i++) c.drawText(lines.get(i) + (i==lines.size()-1?"_":""), 20, 60+i*45, p);
+                      Paint p = new Paint(); p.setColor(Color.WHITE); p.setTextSize(22);
+                      p.setTypeface(Typeface.MONOSPACE); p.setAntiAlias(true);
+                      for(int i=0; i<lines.size(); i++) c.drawText(lines.get(i) + (i==lines.size()-1?"█":""), 15, 40+i*32, p);
                   }
               }
           }
-          EOF
+          JAVA
 
-      - name: Build and Setup project
+      - name: Build APK
         run: |
-          echo "android.useAndroidX=true" > gradle.properties
-          echo "include ':app'" > settings.gradle
-          cat > build.gradle << 'EOF'
-          buildscript { repositories { google(); mavenCentral() }; dependencies { classpath 'com.android.tools.build:gradle:8.2.2' } }
-          allprojects { repositories { google(); mavenCentral() } }
-          EOF
-          cat > app/build.gradle << 'EOF'
-          plugins { id 'com.android.application' }
-          android {
-              namespace 'com.tinyos.vm'
-              compileSdk 34
-              defaultConfig { applicationId "com.tinyos.vm"; minSdk 24; targetSdk 34; versionCode 1; versionName "1.0" }
-          }
-          dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
-          EOF
           wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip && unzip -q gradle-8.5-bin.zip
           export PATH="$PWD/gradle-8.5/bin:$PATH"
           gradle wrapper --gradle-version 8.5 && ./gradlew assembleDebug
@@ -274,5 +412,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TinyOS-v18-FocusFix
+          name: TinyOS-v22-FileSystem
           path: app/build/outputs/apk/debug/app-debug.apk
