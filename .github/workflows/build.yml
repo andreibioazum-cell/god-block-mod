@@ -42,7 +42,7 @@ jobs:
               call print
               jmp shell
           .matrix:
-              mov cx, 500
+              mov cx, 1000
           .ml: mov al, '1'
               mov ah, 0x0E
               int 0x10
@@ -87,7 +87,7 @@ jobs:
               int 0x10
               jmp print
           .d: ret
-          msg_boot   db 'DimOS v12.1 Optimized', 13, 10, 0
+          msg_boot   db 'DimOS v12.2 Opti-Max', 13, 10, 0
           msg_prompt  db '> ', 0
           msg_help    db 'help, matrix, cls', 13, 10, 0
           msg_err     db '?', 13, 10, 0
@@ -103,6 +103,24 @@ jobs:
         run: |
           mkdir -p app/src/main/java/com/tinyos/vm app/src/main/res/layout app/src/main/res/values app/src/main/assets
           cp kernel.bin app/src/main/assets/kernel.bin
+
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.tinyos.vm">
+              <application android:label="TinyOS VM" android:theme="@style/Theme.AppCompat.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="stateAlwaysVisible">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml << 'EOF'
+          <resources><string name="app_name">TinyOS</string></resources>
+          EOF
 
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -222,7 +240,17 @@ jobs:
           EOF
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application' }
-          android { namespace 'com.tinyos.vm'; compileSdk 34; defaultConfig { applicationId "com.tinyos.vm"; minSdk 24; targetSdk 34 } }
+          android { 
+              namespace 'com.tinyos.vm'
+              compileSdk 34 
+              defaultConfig { 
+                  applicationId "com.tinyos.vm"
+                  minSdk 24 
+                  targetSdk 34 
+                  versionCode 1
+                  versionName "1.0"
+              } 
+          }
           dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
           EOF
 
@@ -243,5 +271,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: DimOS-v12-Final
+          name: TinyOS-Optimized-v12
           path: app/build/outputs/apk/debug/app-debug.apk
