@@ -1,399 +1,243 @@
-name: Auto-Build Enjoer Engine APK
-on: 
-  push:
-  workflow_dispatch:
+name: Real TinyOS VM APK
+on: [push, workflow_dispatch]
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Освобождение памяти на сервере
+      - name: Install NASM
+        run: sudo apt-get update && sudo apt-get install -y nasm
+
+      - name: Build Terminal Kernel
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          cat > kernel.asm << 'KERNEL'
+          [bits 16]
+          [org 0x7c00]
+          start:
+              mov ax, 0x0003
+              int 0x10
+              mov si, msg_boot
+              call print
+          shell:
+              mov si, msg_prompt
+              call print
+              mov di, buffer
+              call get_string
+              mov si, buffer
+              mov di, cmd_help
+              call strcmp
+              jz .help
+              mov si, buffer
+              mov di, cmd_cls
+              call strcmp
+              jz start
+              mov si, msg_err
+              call print
+              jmp shell
+          .help:
+              mov si, msg_help
+              call print
+              jmp shell
+          strcmp:
+          .l: mov al, [si]
+              mov bl, [di]
+              cmp al, bl
+              jne .ne
+              or al, al
+              jz .e
+              inc si
+              inc di
+              jmp .l
+          .e: ret
+          .ne: add sp, 2 ; Выход из call
+              ret
+          get_string:
+              xor cx, cx
+          .l: mov ah, 0x00
+              int 0x16
+              cmp al, 13
+              je .d
+              mov [di], al
+              inc di
+              mov ah, 0x0E
+              int 0x10
+              jmp .l
+          .d: mov byte [di], 0
+              mov al, 13
+              int 0x10
+              mov al, 10
+              int 0x10
+              ret
+          print:
+              lodsb
+              or al, al
+              jz .d
+              mov ah, 0x0E
+              int 0x10
+              jmp print
+          .d: ret
+          msg_boot db 'Terminal OS v8.0', 13, 10, 0
+          msg_prompt db '> ', 0
+          msg_help db 'Commands: help, cls', 13, 10, 0
+          msg_err db 'Unknown!', 13, 10, 0
+          cmd_help db 'help', 0
+          cmd_cls db 'cls', 0
+          buffer db 0,0,0,0,0,0,0,0,0,0
+          times 510-($-$$) db 0
+          dw 0xAA55
+          KERNEL
+          nasm -f bin kernel.asm -o kernel.bin
 
-      - name: Генерация кода игры
-        run: |
-          mkdir enjoer_engine
-          cd enjoer_engine
-          
-          keytool -genkey -v -keystore release.keystore -alias mykey -keyalg RSA -keysize 2048 -validity 10000 -storepass password -keypass password -dname "CN=Enjoer,O=Enjoer,C=US"
-          
-          cat << 'EOF' > Cargo.toml
-          [package]
-          name = "enjoer_engine"
-          version = "7.0.0"
-          edition = "2021"
-
-          [lib]
-          name = "enjoer_engine"
-          path = "src/lib.rs"
-          crate-type = ["cdylib"]
-
-          [dependencies]
-          bevy = "0.14.0"
-          bevy_egui = "0.28.0"
-
-          [package.metadata.android]
-          apk_name = "EnjoerEngine"
-          build_targets = ["aarch64-linux-android"]
-          min_sdk_version = 24
-          target_sdk_version = 33
-          strip = "strip"
-          fullscreen = true
-
-          # === БЛОКИРОВКА ГОРИЗОНТАЛЬНОГО РЕЖИМА ===
-          [package.metadata.android.activity_attributes]
-          "android:screenOrientation" = "sensorLandscape"
-          "android:resizeableActivity" = "false"
-
-          [package.metadata.android.signing.release]
-          path = "release.keystore"
-          keystore_password = "password"
-          key_alias = "mykey"
-          key_password = "password"
-
-          # === МАКСИМАЛЬНАЯ ОПТИМИЗАЦИЯ ===
-          [profile.release]
-          opt-level = 3
-          lto = "thin"
-          codegen-units = 1
-          EOF
-          
-          mkdir src
-          cat << 'EOF' > src/lib.rs
-          use bevy::prelude::*;
-          use bevy::window::{PrimaryWindow, WindowMode};
-          use bevy_egui::{egui, EguiContexts, EguiPlugin};
-
-          #[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
-          enum GameState { #[default] MainMenu, Editor, Customize, Playtest }
-
-          #[derive(Component)] struct Player { velocity: f32, is_grounded: bool, walk_phase: f32 }
-          #[derive(Component)] struct CameraPivot;
-          #[derive(Component)] struct PlayerModel;
-          #[derive(Component)] enum Limb { Arm(f32), Leg(f32) }
-          
-          #[derive(Component, Clone, Copy)] 
-          enum BodyPart { Skin, Torso, Legs, Hair }
-
-          #[derive(Resource)]
-          struct PlayerProfile {
-              ridix: u32, inf_ridix: bool, owns_fly: bool,
-              skin_col: [f32; 3], torso_col: [f32; 3], legs_col: [f32; 3], hair_col: [f32; 3],
-              promo_input: String,
-          }
-
-          impl Default for PlayerProfile {
-              fn default() -> Self {
-                  Self {
-                      ridix: 150, inf_ridix: false, owns_fly: false,
-                      skin_col: [1.0, 0.82, 0.6], torso_col: [0.1, 0.4, 1.0],
-                      legs_col: [0.1, 0.8, 0.2], hair_col: [0.2, 0.15, 0.1],
-                      promo_input: "".to_string(),
-                  }
-              }
-          }
-
-          #[derive(Resource, Default)]
-          struct MobileControls { 
-              move_dir: Vec2, look_delta: Vec2, jump_pressed: bool, 
-              joy_center: Option<Vec2>, joy_current: Option<Vec2> 
-          }
-
-          #[derive(Resource)]
-          struct EditorSettings { block_size: Vec3, block_color: Color, place_dist: f32 }
-          impl Default for EditorSettings { fn default() -> Self { Self { block_size: Vec3::splat(4.0), block_color: Color::srgb(0.3, 0.6, 1.0), place_dist: 12.0 } } }
-
-          #[bevy_main]
-          fn main() {
-              App::new()
-                  .add_plugins(DefaultPlugins.set(WindowPlugin {
-                      primary_window: Some(Window { 
-                          title: "Enjoer 7.0".to_string(), 
-                          mode: WindowMode::BorderlessFullscreen, 
-                          ..default() 
-                      }),
-                      ..default()
-                  }))
-                  .insert_resource(Msaa::Off) // Оптимизация для мобилок
-                  .add_plugins(EguiPlugin)
-                  .init_state::<GameState>()
-                  .init_resource::<PlayerProfile>()
-                  .init_resource::<MobileControls>()
-                  .init_resource::<EditorSettings>()
-                  .add_systems(Startup, setup_world)
-                  .add_systems(Update, apply_ui_style)
-                  .add_systems(Update, (menu_ui, editor_ui).run_if(not(in_state(GameState::Playtest))))
-                  .add_systems(Update, (touch_input_system, hud_playtest, player_movement, animate_player, update_colors).run_if(in_state(GameState::Playtest)))
-                  .add_systems(Update, editor_placement.run_if(in_state(GameState::Editor)))
-                  .run();
-          }
-
-          // === МИР И ОСВЕЩЕНИЕ (ТЕНИ) ===
-          fn setup_world(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<StandardMaterial>>) {
-              // Солнце с тенями
-              commands.spawn(DirectionalLightBundle {
-                  directional_light: DirectionalLight {
-                      shadows_enabled: true,
-                      illuminance: 12000.0,
-                      ..default()
-                  },
-                  transform: Transform::from_xyz(10.0, 20.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-                  ..default()
-              });
-              commands.insert_resource(AmbientLight { color: Color::srgb(0.9, 0.9, 1.0), brightness: 250.0 });
-              
-              // Пол
-              commands.spawn(PbrBundle { 
-                  mesh: meshes.add(Plane3d::default().mesh().size(200.0, 200.0)), 
-                  material: materials.add(StandardMaterial { base_color: Color::srgb(0.1, 0.15, 0.25), ..default() }), 
-                  ..default() 
-              });
-
-              let mat = materials.add(Color::WHITE);
-              commands.spawn((SpatialBundle { transform: Transform::from_xyz(0.0, 3.4, 0.0), ..default() }, Player { velocity: 0.0, is_grounded: false, walk_phase: 0.0 }))
-              .with_children(|parent| {
-                  parent.spawn((SpatialBundle::default(), CameraPivot)).with_children(|pivot| {
-                      pivot.spawn(Camera3dBundle { transform: Transform::from_xyz(0.0, 3.0, 12.0).looking_at(Vec3::Y * 2.0, Vec3::Y), ..default() });
-                  });
-
-                  parent.spawn((SpatialBundle::default(), PlayerModel)).with_children(|model| {
-                      model.spawn((PbrBundle { mesh: meshes.add(Cuboid::new(1.4, 1.8, 0.8)), material: mat.clone(), ..default() }, BodyPart::Torso));
-                      model.spawn((PbrBundle { mesh: meshes.add(Cuboid::new(1.15, 1.15, 1.15)), material: mat.clone(), transform: Transform::from_xyz(0.0, 1.475, 0.0), ..default() }, BodyPart::Skin));
-                      
-                      let mut spawn_limb = |p: &mut ChildBuilder, name: BodyPart, is_arm: bool, is_left: bool, size: Vec3, pos: Vec3| {
-                          p.spawn((SpatialBundle { transform: Transform::from_translation(pos), ..default() }, if is_arm { Limb::Arm(if is_left{1.}else{-1.}) } else { Limb::Leg(if is_left{1.}else{-1.}) }))
-                          .with_children(|limb| { limb.spawn((PbrBundle { mesh: meshes.add(Cuboid::new(size.x, size.y, size.z)), material: mat.clone(), transform: Transform::from_xyz(0.0, -size.y/2.0, 0.0), ..default() }, name)); });
-                      };
-
-                      spawn_limb(model, BodyPart::Skin, true, true, Vec3::new(0.55, 1.6, 0.55), Vec3::new(-0.975, 0.8, 0.0));
-                      spawn_limb(model, BodyPart::Skin, true, false, Vec3::new(0.55, 1.6, 0.55), Vec3::new(0.975, 0.8, 0.0));
-                      spawn_limb(model, BodyPart::Legs, false, true, Vec3::new(0.7, 1.6, 0.7), Vec3::new(-0.35, -0.9, 0.0));
-                      spawn_limb(model, BodyPart::Legs, false, false, Vec3::new(0.7, 1.6, 0.7), Vec3::new(0.35, -0.9, 0.0));
-                  });
-              });
-          }
-
-          // === НАТИВНОЕ СЕНСОРНОЕ УПРАВЛЕНИЕ ===
-          fn touch_input_system(touches: Res<Touches>, q_windows: Query<&Window, With<PrimaryWindow>>, mut controls: ResMut<MobileControls>) {
-              controls.move_dir = Vec2::ZERO; controls.look_delta = Vec2::ZERO; controls.jump_pressed = false;
-              let Ok(window) = q_windows.get_single() else { return };
-              let (w, h) = (window.width(), window.height());
-              
-              let mut joy_active = false;
-
-              for touch in touches.iter() {
-                  let pos = touch.position();
-                  
-                  // Левая часть экрана (Джойстик)
-                  if pos.x < w / 2.0 {
-                      joy_active = true;
-                      if controls.joy_center.is_none() || touches.just_pressed(touch.id()) { controls.joy_center = Some(pos); }
-                      controls.joy_current = Some(pos);
-                      let delta = pos - controls.joy_center.unwrap();
-                      controls.move_dir = (delta / 80.0).clamp_length_max(1.0);
-                      controls.move_dir.y = -controls.move_dir.y;
-                  } 
-                  // Правая часть экрана
-                  else {
-                      // Зона прыжка (Круг справа внизу)
-                      let jump_center = Vec2::new(w - 120.0, h - 120.0);
-                      if pos.distance(jump_center) < 80.0 {
-                          controls.jump_pressed = true;
-                      } else {
-                          controls.look_delta += touch.delta();
-                      }
-                  }
-              }
-              if !joy_active { controls.joy_center = None; controls.joy_current = None; }
-          }
-
-          // === ДВИЖЕНИЕ ИГРОКА ===
-          fn player_movement(time: Res<Time>, controls: Res<MobileControls>, mut q_player: Query<(&mut Transform, &mut Player)>, mut q_pivot: Query<&mut Transform, (With<CameraPivot>, Without<Player>)>, mut q_model: Query<&mut Transform, (With<PlayerModel>, Without<Player>, Without<CameraPivot>)>) {
-              for (mut p_trans, mut player) in q_player.iter_mut() {
-                  if controls.look_delta != Vec2::ZERO {
-                      for mut pivot in q_pivot.iter_mut() {
-                          let (mut yaw, mut pitch, _) = pivot.rotation.to_euler(EulerRot::YXZ);
-                          yaw -= controls.look_delta.x * 0.005; pitch -= controls.look_delta.y * 0.005;
-                          pivot.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch.clamp(-0.8, 0.5), 0.0);
-                      }
-                  }
-
-                  let pivot_yaw = q_pivot.single().rotation.to_euler(EulerRot::YXZ).0;
-                  let forward = Quat::from_rotation_y(pivot_yaw) * Vec3::NEG_Z;
-                  let right = Quat::from_rotation_y(pivot_yaw) * Vec3::X;
-
-                  let mut move_dir = forward * controls.move_dir.y + right * controls.move_dir.x;
-                  move_dir.y = 0.0;
-                  let move_mag = move_dir.length();
-                  if move_mag > 0.1 { move_dir = move_dir.normalize(); }
-
-                  if p_trans.translation.y <= 3.4 { p_trans.translation.y = 3.4; player.is_grounded = true; player.velocity = 0.0; } 
-                  else { player.is_grounded = false; player.velocity -= 25.0 * time.delta_seconds(); }
-
-                  if controls.jump_pressed && player.is_grounded { player.velocity = 12.0; }
-
-                  p_trans.translation += move_dir * 12.0 * time.delta_seconds();
-                  p_trans.translation.y += player.velocity * time.delta_seconds();
-
-                  if move_mag > 0.1 {
-                      for mut model in q_model.iter_mut() {
-                          let target_rot = Quat::from_rotation_y(f32::atan2(move_dir.x, move_dir.z));
-                          model.rotation = model.rotation.slerp(target_rot, 15.0 * time.delta_seconds());
-                      }
-                      if player.is_grounded { player.walk_phase += time.delta_seconds() * 10.0 * move_mag; }
-                  } else { player.walk_phase = 0.0; }
-              }
-          }
-
-          fn animate_player(q_player: Query<&Player>, mut q_limbs: Query<(&Limb, &mut Transform)>) {
-              if let Ok(player) = q_player.get_single() {
-                  let jsp = if !player.is_grounded { 2.5 } else { 0.0 };
-                  let walk_sin = player.walk_phase.sin();
-                  for (limb, mut trans) in q_limbs.iter_mut() {
-                      match limb {
-                          Limb::Arm(side) => trans.rotation = Quat::from_rotation_x(walk_sin * 0.6 * side - jsp),
-                          Limb::Leg(side) => trans.rotation = Quat::from_rotation_x(-walk_sin * 0.5 * side),
-                      }
-                  }
-              }
-          }
-
-          fn update_colors(profile: Res<PlayerProfile>, q_parts: Query<(&mut Handle<StandardMaterial>, &BodyPart)>, mut materials: ResMut<Assets<StandardMaterial>>) {
-              for (mat_handle, part) in q_parts.iter() {
-                  if let Some(mat) = materials.get_mut(mat_handle) {
-                      match part {
-                          BodyPart::Skin => mat.base_color = Color::srgb(profile.skin_col[0], profile.skin_col[1], profile.skin_col[2]),
-                          BodyPart::Torso => mat.base_color = Color::srgb(profile.torso_col[0], profile.torso_col[1], profile.torso_col[2]),
-                          BodyPart::Legs => mat.base_color = Color::srgb(profile.legs_col[0], profile.legs_col[1], profile.legs_col[2]),
-                          BodyPart::Hair => mat.base_color = Color::srgb(profile.hair_col[0], profile.hair_col[1], profile.hair_col[2]),
-                      }
-                  }
-              }
-          }
-
-          // === ДИЗАЙН И ИНТЕРФЕЙС ===
-          fn apply_ui_style(mut contexts: EguiContexts) {
-              let mut visuals = egui::Visuals::dark();
-              visuals.window_fill = egui::Color32::from_rgb(2, 5, 10);
-              visuals.panel_fill = egui::Color32::from_rgb(2, 5, 10);
-              contexts.ctx_mut().set_visuals(visuals);
-          }
-
-          fn menu_ui(mut contexts: EguiContexts, state: Res<State<GameState>>, mut next_state: ResMut<NextState<GameState>>, mut profile: ResMut<PlayerProfile>) {
-              let ctx = contexts.ctx_mut();
-              let blue = egui::Color32::from_rgb(0, 191, 255);
-              let gold = egui::Color32::from_rgb(255, 215, 0);
-
-              if *state.get() == GameState::MainMenu {
-                  egui::CentralPanel::default().show(ctx, |ui| {
-                      ui.vertical_centered(|ui| {
-                          ui.add_space(30.0);
-                          ui.heading(egui::RichText::new("Enjoer 7.0").size(60.0).color(blue).strong());
-                          ui.label(egui::RichText::new(format!("Ridix: {}", if profile.inf_ridix {"∞".into()} else {profile.ridix.to_string()})).size(24.0).color(gold));
-                          ui.add_space(40.0);
-                          if ui.add_sized([300.0, 70.0], egui::Button::new(egui::RichText::new("PLAY").size(24.0))).clicked() { next_state.set(GameState::Playtest); }
-                          ui.add_space(10.0);
-                          if ui.add_sized([300.0, 70.0], egui::Button::new(egui::RichText::new("EDITOR").size(24.0))).clicked() { next_state.set(GameState::Editor); }
-                          ui.add_space(10.0);
-                          if ui.add_sized([300.0, 70.0], egui::Button::new(egui::RichText::new("CUSTOMIZE").size(24.0))).clicked() { next_state.set(GameState::Customize); }
-                      });
-                  });
-              } else if *state.get() == GameState::Customize {
-                  egui::SidePanel::left("cust_panel").min_width(300.0).show(ctx, |ui| {
-                      ui.heading(egui::RichText::new("Customize").size(26.0).color(blue));
-                      ui.separator();
-                      ui.horizontal(|ui| { ui.label("Promo:"); ui.text_edit_singleline(&mut profile.promo_input); if ui.button("Apply").clicked() { if profile.promo_input == "Dimasi4ek229" { profile.inf_ridix = true; } profile.promo_input.clear(); } });
-                      ui.separator();
-                      ui.label("Skin"); ui.color_edit_button_rgb(&mut profile.skin_col);
-                      ui.label("Torso"); ui.color_edit_button_rgb(&mut profile.torso_col);
-                      ui.label("Legs"); ui.color_edit_button_rgb(&mut profile.legs_col);
-                      ui.label("Hair"); ui.color_edit_button_rgb(&mut profile.hair_col);
-                      ui.add_space(20.0);
-                      if ui.add_sized([200.0, 60.0], egui::Button::new(egui::RichText::new("Back").size(20.0))).clicked() { next_state.set(GameState::MainMenu); }
-                  });
-              }
-          }
-
-          fn editor_ui(mut contexts: EguiContexts, mut next_state: ResMut<NextState<GameState>>, mut editor: ResMut<EditorSettings>) {
-              egui::SidePanel::left("editor_panel").show(contexts.ctx_mut(), |ui| {
-                  if ui.button("Menu").clicked() { next_state.set(GameState::MainMenu); }
-                  ui.separator();
-                  ui.label("Size X"); ui.add(egui::Slider::new(&mut editor.block_size.x, 0.5..=10.0));
-                  ui.label("Size Y"); ui.add(egui::Slider::new(&mut editor.block_size.y, 0.5..=10.0));
-                  ui.label("Size Z"); ui.add(egui::Slider::new(&mut editor.block_size.z, 0.5..=10.0));
-                  ui.separator();
-                  let mut rgb = [editor.block_color.to_srgba().red, editor.block_color.to_srgba().green, editor.block_color.to_srgba().blue];
-                  ui.color_edit_button_rgb(&mut rgb); editor.block_color = Color::srgb(rgb[0], rgb[1], rgb[2]);
-              });
-          }
-
-          // === ВИЗУАЛ ДЖОЙСТИКА (С ИСПРАВЛЕНИЕМ Id) ===
-          fn hud_playtest(mut contexts: EguiContexts, mut next_state: ResMut<NextState<GameState>>, controls: Res<MobileControls>, q_windows: Query<&Window, With<PrimaryWindow>>) {
-              let ctx = contexts.ctx_mut();
-              let Ok(window) = q_windows.get_single() else { return };
-              let (w, h) = (window.width(), window.height());
-
-              egui::Area::new(egui::Id::new("hud_overlay")).fixed_pos(egui::pos2(0.0, 0.0)).show(ctx, |ui| {
-                  let painter = ui.painter();
-                  
-                  if ui.put(egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(80.0, 40.0)), egui::Button::new(egui::RichText::new("Menu").color(egui::Color32::RED))).clicked() {
-                      next_state.set(GameState::MainMenu);
-                  }
-
-                  if let (Some(center), Some(current)) = (controls.joy_center, controls.joy_current) {
-                      painter.circle_filled(egui::pos2(center.x, center.y), 60.0, egui::Color32::from_black_alpha(100));
-                      painter.circle_filled(egui::pos2(current.x, current.y), 25.0, egui::Color32::from_white_alpha(200));
-                  } else {
-                      painter.circle_filled(egui::pos2(120.0, h - 120.0), 60.0, egui::Color32::from_black_alpha(50));
-                  }
-
-                  let jump_center = egui::pos2(w - 120.0, h - 120.0);
-                  let jump_color = if controls.jump_pressed { egui::Color32::from_white_alpha(200) } else { egui::Color32::from_black_alpha(100) };
-                  painter.circle_filled(jump_center, 60.0, jump_color);
-                  painter.text(jump_center, egui::Align2::CENTER_CENTER, "JUMP", egui::FontId::proportional(20.0), egui::Color32::WHITE);
-              });
-          }
-
-          fn editor_placement() {}
-          EOF
-
-      - name: Установка Java
-        uses: actions/setup-java@v3
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
           java-version: '17'
+          distribution: 'temurin'
 
-      - name: Установка Android NDK и SDK
+      - name: Setup Android Project
         run: |
-          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses
-          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653" "platforms;android-30" "platforms;android-33" "build-tools;33.0.2" "build-tools;30.0.3"
+          # Создаем папки по одной для надежности
+          mkdir -p app/src/main
+          mkdir -p app/src/main/java/com/tinyos/vm
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/assets
+          
+          cp kernel.bin app/src/main/assets/kernel.bin
 
-      - name: Установка Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
+          cat > app/src/main/AndroidManifest.xml << 'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.tinyos.vm">
+              <application android:label="TinyOS Terminal" android:theme="@style/Theme.AppCompat.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="stateVisible">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          XML
 
-      - name: Кеширование зависимостей
-        uses: Swatinem/rust-cache@v2
-        with:
-          work-dir: enjoer_engine
+          cat > app/src/main/res/values/strings.xml << 'XML'
+          <resources><string name="app_name">TinyOS</string></resources>
+          XML
 
-      - name: Установка сборщика APK
-        run: cargo install cargo-apk
+          cat > app/src/main/res/layout/activity_main.xml << 'XML'
+          <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent" android:background="#000">
+              <SurfaceView android:id="@+id/s" android:layout_width="match_parent" android:layout_height="match_parent" />
+              <EditText android:id="@+id/e" android:layout_width="0dp" android:layout_height="0dp" android:inputType="text" />
+          </RelativeLayout>
+          XML
 
-      - name: Сборка APK файла
+          cat > app/src/main/java/com/tinyos/vm/MainActivity.java << 'JAVA'
+          package com.tinyos.vm;
+          import android.os.*;
+          import android.graphics.*;
+          import android.view.*;
+          import android.widget.EditText;
+          import androidx.appcompat.app.AppCompatActivity;
+          import java.util.*;
+
+          public class MainActivity extends AppCompatActivity {
+              X86Emulator emu;
+              Queue<Character> keys = new LinkedList<>();
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  setContentView(R.layout.activity_main);
+                  emu = new X86Emulator();
+                  EditText et = findViewById(R.id.e);
+                  et.requestFocus();
+                  et.setOnKeyListener((v, k, e) -> {
+                      if(e.getAction()==KeyEvent.ACTION_DOWN) {
+                          char c = (char)e.getUnicodeChar();
+                          if(k==KeyEvent.KEYCODE_ENTER) c = (char)13;
+                          if(c != 0) keys.add(c);
+                      }
+                      return false;
+                  });
+                  SurfaceView sv = findViewById(R.id.s);
+                  sv.getHolder().addCallback(new SurfaceHolder.Callback() {
+                      public void surfaceCreated(SurfaceHolder h) {
+                          new Thread(() -> {
+                              while(true) {
+                                  for(int i=0; i<500; i++) emu.step();
+                                  Canvas c = h.lockCanvas();
+                                  if(c!=null) { emu.draw(c); h.unlockCanvasAndPost(c); }
+                                  try { Thread.sleep(20); } catch(Exception ex) {}
+                              }
+                          }).start();
+                      }
+                      public void surfaceChanged(SurfaceHolder h, int f, int w, int h1) {}
+                      public void surfaceDestroyed(SurfaceHolder h) {}
+                  });
+              }
+              class X86Emulator {
+                  byte[] m = new byte[65536];
+                  int ax, si, di, ip=0x7C00;
+                  List<String> lines = new ArrayList<>(Arrays.asList(""));
+                  X86Emulator() { try { getAssets().open("kernel.bin").read(m, 0x7C00, 512); } catch(Exception e){} }
+                  void step() {
+                      int op = m[ip] & 0xFF;
+                      if(op==0xB4) { ax=(ax&0xFF)|((m[ip+1]&0xFF)<<8); ip+=2; }
+                      else if(op==0xB0) { ax=(ax&0xFF00)|(m[ip+1]&0xFF); ip+=2; }
+                      else if(op==0xBE) { si=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); ip+=3; }
+                      else if(op==0xBF) { di=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); ip+=3; }
+                      else if(op==0xAC) { ax=(ax&0xFF00)|(m[si]&0xFF); si++; ip++; }
+                      else if(op==0xCD) {
+                          int n=m[ip+1]&0xFF;
+                          if(n==0x10) {
+                              if(((ax>>8)&0xFF)==0x0E) {
+                                  char c=(char)(ax&0xFF);
+                                  if(c==13) lines.add(""); else lines.set(lines.size()-1, lines.get(lines.size()-1)+c);
+                              } else { lines.clear(); lines.add(""); }
+                          } else if(n==0x16) {
+                              if(keys.isEmpty()) return;
+                              ax=(ax&0xFF00)|keys.poll();
+                          }
+                          ip+=2;
+                      } else { ip++; }
+                  }
+                  void draw(Canvas c) {
+                      c.drawColor(Color.BLACK);
+                      Paint p = new Paint(); p.setColor(Color.GREEN); p.setTextSize(40);
+                      for(int i=0; i<lines.size(); i++) c.drawText(lines.get(i), 20, 60+i*50, p);
+                  }
+              }
+          }
+          JAVA
+
+          echo "include ':app'" > settings.gradle
+          echo "android.useAndroidX=true" > gradle.properties
+          cat > build.gradle << 'XML'
+          buildscript { repositories { google(); mavenCentral() }; dependencies { classpath 'com.android.tools.build:gradle:8.2.2' } }
+          allprojects { repositories { google(); mavenCentral() } }
+          XML
+          cat > app/build.gradle << 'XML'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'com.tinyos.vm'
+              compileSdk 34
+              defaultConfig { applicationId "com.tinyos.vm"; minSdk 24; targetSdk 34; versionCode 1; versionName "1.0" }
+          }
+          dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
+          XML
+
+      - name: Build APK
         run: |
-          cd enjoer_engine
-          export ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/25.2.9519653
-          export ANDROID_SDK_ROOT=${ANDROID_HOME}
-          cargo apk build --release
+          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
+          unzip -q gradle-8.5-bin.zip
+          export PATH="$PWD/gradle-8.5/bin:$PATH"
+          gradle wrapper --gradle-version 8.5
+          ./gradlew assembleDebug
 
-      - name: Выдача APK для скачивания
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Enjoer-Engine-APK
-          path: enjoer_engine/target/release/apk/*.apk
+          name: TinyOS-Terminal
+          path: app/build/outputs/apk/debug/app-debug.apk
