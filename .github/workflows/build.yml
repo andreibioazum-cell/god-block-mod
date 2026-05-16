@@ -12,42 +12,44 @@ jobs:
       - name: Install NASM
         run: sudo apt-get update && sudo apt-get install -y nasm
 
+# ==============================
+# СБОРКА ОБРАЗА ОС (STAGE 1)
+# ==============================
       - name: Build OS Image
         run: |
           cat > kernel.asm << 'EOF'
           [bits 16]
           [org 0x7c00]
           
-          ; Загрузчик (Stage 1)
           start:
-              mov ax, 0x0013   ; ПЕРЕКЛЮЧАЕМСЯ В ГРАФИЧЕСКИЙ РЕЖИМ VGA (320x200, 256 цветов)
-              int 0x10         ; Теперь всё "по-настоящему"
+              mov ax, 0x0013   ; Переключаемся в графический режим VGA 320x200
+              int 0x10
               
-              ; Рисуем синий квадрат прямо в видеопамять (0xA000)
-              mov ax, 0xA000
+              ; РИСУЕМ СИНИЙ КВАДРАТ (ПРЯМАЯ ЗАПИСЬ В ВИДЕОПАМЯТЬ 0xA000)
+              mov ax, 0xA000   ; Сегмент видеопамяти
               mov es, ax
-              mov di, 0
-              mov cx, 2000     ; Закрасим кусок экрана
-              mov al, 1        ; Синий цвет
-              rep stosb        ; Прямая запись в "железо"
-
+              xor di, di       ; Начинаем с верхнего левого угла (0,0)
+              mov al, 1        ; Цвет №1 (Синий в стандартной палитре VGA)
+              mov cx, 10000    ; Закрасить 10 000 пикселей
+          fill_loop:
+              stosb            ; Записать AL в ES:DI и увеличить DI
+              loop fill_loop   ; Повторять, пока CX не станет 0
+              
               mov si, msg_boot
-              call print_gfx
+              call print_vga
+              
+              jmp $            ; Зациклить (ОС работает)
 
-          shell:
-              ; Тут твоя ОС может работать дальше...
-              jmp $
-
-          print_gfx: ; Упрощенная печать для граф. режима
+          print_vga: ; Печать символов через BIOS в граф. режиме
               lodsb
               or al, al
               jz .done
               mov ah, 0x0E
               int 0x10
-              jmp print_gfx
+              jmp print_vga
           .done: ret
 
-          msg_boot db 'VGA GRAPHICS MODE ACTIVE', 0
+          msg_boot db 'HARDWARE VGA MODE ACTIVE', 0
 
           times 510-($-$$) db 0
           dw 0xAA55
@@ -60,10 +62,33 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+# ==============================
+# СОЗДАНИЕ ANDROID ПРОЕКТА
+# ==============================
       - name: Setup Android Project
         run: |
-          mkdir -p app/src/main/java/com/tinyos/vm app/src/main/res/layout app/src/main/res/values app/src/main/assets
+          mkdir -p app/src/main/java/com/tinyos/vm
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/assets
+          
           cp kernel.img app/src/main/assets/kernel.img
+
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.tinyos.vm">
+              <application android:label="TinyOS Hardware" android:theme="@style/Theme.AppCompat.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="landscape">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          echo '<resources><string name="app_name">TinyOS</string></resources>' > app/src/main/res/values/strings.xml
 
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -78,6 +103,7 @@ jobs:
           import android.graphics.*;
           import android.view.*;
           import androidx.appcompat.app.AppCompatActivity;
+          import java.io.InputStream;
 
           public class MainActivity extends AppCompatActivity {
               X86Emulator emu;
@@ -94,7 +120,7 @@ jobs:
                       public void surfaceCreated(SurfaceHolder h) {
                           new Thread(() -> {
                               while(true) {
-                                  for(int i=0; i<10000; i++) emu.step();
+                                  for(int i=0; i<20000; i++) emu.step();
                                   updateGraphics();
                                   Canvas c = h.lockCanvas();
                                   if(c!=null) {
@@ -111,35 +137,42 @@ jobs:
               }
 
               void updateGraphics() {
-                  // ПРЯМАЯ ЭМУЛЯЦИЯ ВИДЕОПАМЯТИ VGA 0xA0000
                   for (int i = 0; i < 320 * 200; i++) {
                       int colorIdx = emu.mem[0xA0000 + i] & 0xFF;
-                      // Палитра (упрощенно)
                       if(colorIdx == 0) pixels[i] = Color.BLACK;
                       else if(colorIdx == 1) pixels[i] = Color.BLUE;
-                      else if(colorIdx == 15) pixels[i] = Color.WHITE;
-                      else pixels[i] = Color.GREEN;
+                      else pixels[i] = Color.WHITE;
                   }
                   screenBitmap.setPixels(pixels, 0, 320, 0, 0, 320, 200);
               }
 
               class X86Emulator {
-                  byte[] mem = new byte[1024 * 1024]; // 1MB RAM
-                  int ax, si, ip=0x7C00, cs=0;
+                  byte[] mem = new byte[1024 * 1024]; 
+                  int ax, cx, si, di, ip=0x7C00, es_base=0;
+                  
                   X86Emulator() {
-                      try { getAssets().open("kernel.img").read(mem, 0x7C00, 512); } catch(Exception e){}
+                      try {
+                          InputStream is = getAssets().open("kernel.img");
+                          is.read(mem, 0x7C00, 512);
+                      } catch(Exception e){}
                   }
+
                   void step() {
                       int op = mem[ip] & 0xFF;
                       switch(op) {
-                          case 0xB8: ax=(mem[ip+1]&0xFF)|((mem[ip+2]&0xFF)<<8); ip+=3; break;
-                          case 0xB0: ax=(ax&0xFF00)|(mem[ip+1]&0xFF); ip+=2; break;
-                          case 0xBE: si=(mem[ip+1]&0xFF)|((mem[ip+2]&0xFF)<<8); ip+=3; break;
-                          case 0xAC: ax=(ax&0xFF00)|(mem[si]&0xFF); si++; ip++; break;
-                          case 0xAA: // STOSB - запись AL в ES:DI (видеопамять!)
-                              mem[0xA0000 + ax] = (byte)(ax & 0xFF); ip++; break; 
-                          case 0xCD: 
-                              if((mem[ip+1]&0xFF) == 0x10) { /* Просто заглушка для режима */ }
+                          case 0xB8: ax=(mem[ip+1]&0xFF)|((mem[ip+2]&0xFF)<<8); ip+=3; break; // mov ax, imm16
+                          case 0xB9: cx=(mem[ip+1]&0xFF)|((mem[ip+2]&0xFF)<<8); ip+=3; break; // mov cx, imm16
+                          case 0xBE: si=(mem[ip+1]&0xFF)|((mem[ip+2]&0xFF)<<8); ip+=3; break; // mov si, imm16
+                          case 0xBF: di=(mem[ip+1]&0xFF)|((mem[ip+2]&0xFF)<<8); ip+=3; break; // mov di, imm16
+                          case 0x8E: // mov es, ax
+                              if((mem[ip+1]&0xFF) == 0xC0) es_base = ax << 4;
+                              ip+=2; break;
+                          case 0xAA: // stosb
+                              mem[es_base + di] = (byte)(ax & 0xFF);
+                              di++; ip++; break;
+                          case 0xE2: // loop
+                              cx--; if(cx > 0) ip += (byte)mem[ip+1] + 2; else ip+=2; break;
+                          case 0xCD: // int 10h
                               ip+=2; break;
                           default: ip++; break;
                       }
@@ -148,26 +181,48 @@ jobs:
           }
           EOF
 
+# ==============================
+# НАСТРОЙКА GRADLE
+# ==============================
+      - name: Setup Gradle
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
+          unzip -q gradle-8.5-bin.zip
+          export PATH="$PWD/gradle-8.5/bin:$PATH"
+          gradle wrapper --gradle-version 8.5
+          
           echo "android.useAndroidX=true" > gradle.properties
           echo "include ':app'" > settings.gradle
+
           cat > build.gradle << 'EOF'
-          buildscript { repositories { google(); mavenCentral() }; dependencies { classpath 'com.android.tools.build:gradle:8.2.2' } }
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies { classpath 'com.android.tools.build:gradle:8.2.2' }
+          }
           allprojects { repositories { google(); mavenCentral() } }
           EOF
-          cat > app/build.gradle << 'APP'
+
+          cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application' }
-          android { namespace 'com.tinyos.vm'; compileSdk 34; defaultConfig { applicationId "com.tinyos.vm"; minSdk 24; targetSdk 34 } }
+          android {
+              namespace 'com.tinyos.vm'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.tinyos.vm"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 16
+                  versionName "16.0"
+              }
+          }
           dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
-          APP
+          EOF
 
       - name: Build APK
-        run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip && unzip -q gradle-8.5-bin.zip
-          export PATH="$PWD/gradle-8.5/bin:$PATH"
-          gradle wrapper --gradle-version 8.5 && ./gradlew assembleDebug
+        run: ./gradlew assembleDebug
 
-      - name: Upload
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TinyOS-Hardware-v16
+          name: TinyOS-Hardware-v16-Fixed
           path: app/build/outputs/apk/debug/app-debug.apk
