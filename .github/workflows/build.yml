@@ -1,4 +1,4 @@
-name: TinyOS v23 Real Segments
+name: TinyOS v23 Real Segments Fixed
 
 on: [push, workflow_dispatch]
 
@@ -26,25 +26,24 @@ jobs:
           ; --- STAGE 1: BOOTLOADER ---
           jmp 0:boot_start
           boot_start:
-              mov ax, 0x1000   ; Адрес сегмента для ядра
+              mov ax, 0x1000   ; Сегмент ядра
               mov es, ax
               xor bx, bx
-              mov ah, 0x02     ; Функция BIOS: Читать сектора
-              mov al, 10       ; Читать 10 секторов
-              mov ch, 0        ; Цилиндр 0
-              mov cl, 2        ; Начать со 2-го сектора
-              mov dh, 0        ; Головка 0
+              mov ah, 0x02     ; Читать сектора
+              mov al, 15       ; 15 секторов
+              mov ch, 0
+              mov cl, 2        ; Со 2-го сектора
+              mov dh, 0
               int 0x13
-              
-              jmp 0x1000:0000  ; FAR JUMP в загруженное ядро
+              jmp 0x1000:0000  ; FAR JUMP в ядро
 
           times 510-($-$$) db 0
           dw 0xAA55
 
-          ; --- STAGE 2: KERNEL (Загружается по адресу 0x1000:0000) ---
+          ; --- STAGE 2: KERNEL ---
           kernel_entry:
               push cs
-              pop ds           ; Устанавливаем сегмент данных равным сегменту кода
+              pop ds
               mov si, msg_welcome
               call print
           shell:
@@ -66,7 +65,7 @@ jobs:
               mov si, buffer
               mov di, cmd_cls
               call strcmp
-              jz 0x7C00 ; Прыжок на перезагрузку (Stage 1)
+              jz 0x7C00
 
               mov al, [buffer]
               or al, al
@@ -147,18 +146,24 @@ jobs:
               int 0x16
               cmp al, 13
               je .d
-              cmp al, 8       ; Backspace
+              cmp al, 8
               je .back
               mov [di], al
               inc di
+              inc cx
               mov ah, 0x0E
               int 0x10
               jmp .l
           .back:
-              or cx, cx
-              jz .l
+              jcxz .l
               dec di
               dec cx
+              mov ah, 0x0E
+              int 0x10
+              mov al, ' '
+              int 0x10
+              mov al, 8
+              int 0x10
               jmp .l
           .d: mov byte [di], 0
               mov al, 13
@@ -176,11 +181,11 @@ jobs:
               jmp print
           .d: ret
 
-          msg_welcome db 'DimOS v23.0 - Real Segments Active', 13, 10, 0
+          msg_welcome db 'DimOS v23.0 Pro (Fixed)', 13, 10, 0
           msg_prompt  db '~ $ ', 0
           msg_space   db '  ', 0
           msg_nl      db 13, 10, 0
-          msg_err     db 'Bad command', 13, 10, 0
+          msg_err     db 'Unknown command', 13, 10, 0
           cmd_ls      db 'ls', 0
           cmd_touch   db 'touch ', 0
           cmd_cls     db 'cls', 0
@@ -235,7 +240,7 @@ jobs:
               android:layout_width="match_parent" android:layout_height="match_parent" android:background="#000">
               <SurfaceView android:id="@+id/s" android:layout_width="match_parent" android:layout_height="match_parent" />
               <EditText android:id="@+id/e" android:layout_width="1dp" android:layout_height="1dp" android:alpha="0" android:focusable="true" android:focusableInTouchMode="true" android:inputType="textNoSuggestions" android:imeOptions="flagNoExtractUi" />
-              <Button android:id="@+id/rotate" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ROTATE" android:layout_alignParentTop="true" android:layout_alignParentRight="true" android:alpha="0.5"/>
+              <Button android:id="@+id/rotate" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ROT" android:layout_alignParentTop="true" android:layout_alignParentRight="true" android:alpha="0.3"/>
           </RelativeLayout>
           EOF
 
@@ -249,6 +254,7 @@ jobs:
           import android.widget.*;
           import androidx.appcompat.app.AppCompatActivity;
           import java.util.*;
+          import java.io.*;
 
           public class MainActivity extends AppCompatActivity {
               X86Emulator emu;
@@ -299,14 +305,15 @@ jobs:
               }
 
               class X86Emulator {
-                  byte[] m = new byte[1024 * 1024]; // 1MB RAM
+                  byte[] m = new byte[1024 * 1024]; 
                   int ax, si, di, ip=0x7C00, cs=0, ds=0, es=0, sp=0x9000;
                   boolean zf = false;
-                  Queue<Character> keys = new LinkedList<>();
+                  public Queue<Character> keys = new LinkedList<>();
                   List<String> lines = new ArrayList<>(Arrays.asList(""));
 
                   X86Emulator() {
-                      try { getAssets().open("kernel.img").read(m, 0, 8192 + 512); } catch(Exception e){}
+                      try { InputStream is = getAssets().open("kernel.img");
+                            is.read(m, 0, 9000); } catch(Exception e){}
                   }
                   
                   void step() {
@@ -320,21 +327,20 @@ jobs:
                           case 0xBF: di=(m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8); ip+=3; break;
                           case 0xAC: ax=(ax&0xFF00)|(m[(ds<<4)+(si&0xFFFF)]&0xFF); si++; ip++; break;
                           case 0xAA: m[(es<<4)+(di&0xFFFF)]=(byte)(ax&0xFF); di++; ip++; break;
-                          case 0xE8: int r=ip+3; m[--sp]=(byte)(r>>8); m[--sp]=(byte)r; ip+=3+((m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8)); break;
+                          case 0xE8: int r=ip+3; m[--sp]=(byte)(r>>8); m[--sp]=(byte)r; 
+                                     ip+=3+((short)((m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8))); break;
                           case 0xC3: ip=(m[sp++]&0xFF)|((m[sp++]&0xFF)<<8); break;
                           case 0xCD: handleInt(m[absIp+1]&0xFF); ip+=2; break;
                           case 0x3C: zf=(ax&0xFF)==(m[absIp+1]&0xFF); ip+=2; break;
                           case 0x74: if(zf) ip+=(byte)m[absIp+1]+2; else ip+=2; break;
-                          case 0xEA: // JMP FAR
-                              ip = (m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8);
-                              cs = (m[absIp+3]&0xFF)|((m[absIp+4]&0xFF)<<8); break;
-                          case 0x1E: m[--sp]=(byte)(ds>>8); m[--sp]=(byte)ds; ip++; break; // push ds
-                          case 0x0E: m[--sp]=(byte)(cs>>8); m[--sp]=(byte)cs; ip++; break; // push cs
-                          case 0x1F: ds=(m[sp++]&0xFF)|((m[sp++]&0xFF)<<8); ip++; break; // pop ds
-                          case 0x8E: // mov segment register
-                              int next = m[absIp+1]&0xFF;
-                              if(next==0xC0) es=ax; else if(next==0xD8) ds=ax;
-                              ip+=2; break;
+                          case 0xEA: ip=(m[absIp+1]&0xFF)|((m[absIp+2]&0xFF)<<8);
+                                     cs=(m[absIp+3]&0xFF)|((m[absIp+4]&0xFF)<<8); break;
+                          case 0x1E: m[--sp]=(byte)(ds>>8); m[--sp]=(byte)ds; ip++; break;
+                          case 0x0E: m[--sp]=(byte)(cs>>8); m[--sp]=(byte)cs; ip++; break;
+                          case 0x1F: ds=(m[sp++]&0xFF)|((m[sp++]&0xFF)<<8); ip++; break;
+                          case 0x8E: int next=m[absIp+1]&0xFF;
+                                     if(next==0xC0) es=ax; else if(next==0xD8) ds=ax;
+                                     ip+=2; break;
                           default: ip++; break;
                       }
                   }
@@ -344,14 +350,12 @@ jobs:
                           if(((ax>>8)&0xFF)==0x0E) {
                               char c=(char)(ax&0xFF);
                               if(c==13) lines.add(""); else if(c>=32) lines.set(lines.size()-1, lines.get(lines.size()-1)+c);
+                              else if(c==8) { String s=lines.get(lines.size()-1); if(s.length()>0) lines.set(lines.size()-1, s.substring(0,s.length()-1)); }
                               if(lines.size()>28) lines.remove(0);
                           } else { lines.clear(); lines.add(""); }
                       } else if(n==0x16) {
                           if(!keys.isEmpty()) ax=(ax&0xFF00)|keys.poll(); else ip-=2;
-                      } else if(n==0x13) { 
-                          // Симуляция BIOS: копируем ядро из "диска" (начала памяти) в сегмент 0x1000
-                          System.arraycopy(m, 512, m, 0x10000, 8192);
-                      }
+                      } else if(n==0x13) { System.arraycopy(m, 512, m, 0x10000, 8192); }
                   }
 
                   void draw(Canvas c) {
@@ -361,7 +365,7 @@ jobs:
                   }
               }
           }
-          JAVA
+          EOF
 
       - name: Build APK
         run: |
@@ -369,8 +373,8 @@ jobs:
           export PATH="$PWD/gradle-8.5/bin:$PATH"
           gradle wrapper --gradle-version 8.5 && ./gradlew assembleDebug
 
-      - name: Upload
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TinyOS-v23-Pro
+          name: TinyOS-v23-Fixed
           path: app/build/outputs/apk/debug/app-debug.apk
