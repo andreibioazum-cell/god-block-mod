@@ -13,7 +13,7 @@ jobs:
 
       - name: Build x86 Shell Kernel
         run: |
-          cat > kernel.asm << 'KERNEL'
+          cat > kernel.asm << 'EOF'
           [bits 16]
           [org 0x7c00]
           start:
@@ -87,7 +87,7 @@ jobs:
               int 0x10
               jmp print
           .d: ret
-          msg_boot   db 'DimOS v12.0 Optimized', 13, 10, 0
+          msg_boot   db 'DimOS v12.1 Optimized', 13, 10, 0
           msg_prompt  db '> ', 0
           msg_help    db 'help, matrix, cls', 13, 10, 0
           msg_err     db '?', 13, 10, 0
@@ -96,23 +96,23 @@ jobs:
           buffer      times 16 db 0
           times 510-($-$$) db 0
           dw 0xAA55
-          KERNEL
+          EOF
           nasm -f bin kernel.asm -o kernel.bin
 
-      - name: Create Android Project
+      - name: Create Android Project Structure
         run: |
           mkdir -p app/src/main/java/com/tinyos/vm app/src/main/res/layout app/src/main/res/values app/src/main/assets
           cp kernel.bin app/src/main/assets/kernel.bin
 
-          cat > app/src/main/res/layout/activity_main.xml << 'XML'
+          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent" android:layout_height="match_parent" android:background="#000">
               <SurfaceView android:id="@+id/s" android:layout_width="match_parent" android:layout_height="match_parent" />
               <EditText android:id="@+id/e" android:layout_width="0dp" android:layout_height="0dp" android:inputType="textNoSuggestions" />
           </RelativeLayout>
-          XML
+          EOF
 
-          cat > app/src/main/java/com/tinyos/vm/MainActivity.java << 'JAVA'
+          cat > app/src/main/java/com/tinyos/vm/MainActivity.java << 'EOF'
           package com.tinyos.vm;
           import android.os.*;
           import android.graphics.*;
@@ -153,21 +153,17 @@ jobs:
                       public void surfaceCreated(SurfaceHolder h) {
                           new Thread(() -> {
                               while(true) {
-                                  // Выполняем пачку инструкций за раз (быстро)
                                   for(int i=0; i<5000; i++) emu.step();
-                                  
-                                  // Рисуем на экран (строго по расписанию)
                                   Canvas c = h.lockCanvas();
                                   if(c!=null) {
                                       vCanvas.drawColor(Color.BLACK);
                                       Paint p = new Paint(); p.setColor(Color.GREEN); p.setTextSize(14); p.setTypeface(Typeface.MONOSPACE);
                                       for(int i=0; i<emu.lines.size(); i++) 
                                           vCanvas.drawText(emu.lines.get(i) + (i==emu.lines.size()-1?"_":""), 10, 20+i*15, p);
-                                      
                                       c.drawBitmap(vScreen, null, new Rect(0,0,c.getWidth(),c.getHeight()), null);
                                       h.unlockCanvasAndPost(c);
                                   }
-                                  try { Thread.sleep(16); } catch(Exception ex) {} // 60 FPS
+                                  try { Thread.sleep(16); } catch(Exception ex) {}
                               }
                           }).start();
                       }
@@ -178,20 +174,22 @@ jobs:
 
               class X86Emulator {
                   byte[] m = new byte[65536];
-                  int ax, si, ip=0x7C00, sp=0x9000;
+                  int ax, si, di, ip=0x7C00, sp=0x9000, cx;
                   boolean zf = false;
                   List<String> lines = new ArrayList<>(Arrays.asList(""));
                   X86Emulator() { try { getAssets().open("kernel.bin").read(m, 0x7C00, 512); } catch(Exception e){} }
                   
                   void step() {
                       int op = m[ip] & 0xFF;
-                      // Используем switch вместо if-else для скорости
                       switch(op) {
                           case 0xB8: ax=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); ip+=3; break;
                           case 0xB4: ax=(ax & 0xFF)|((m[ip+1]&0xFF)<<8); ip+=2; break;
                           case 0xB0: ax=(ax & 0xFF00)|(m[ip+1]&0xFF); ip+=2; break;
-                          case 0xBE: si=(m[ip+1]&0xFF)|((memHigh(ip+2))<<8); ip+=3; break;
+                          case 0xB9: cx=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); ip+=3; break;
+                          case 0xBE: si=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); ip+=3; break;
+                          case 0xBF: di=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); ip+=3; break;
                           case 0xAC: ax=(ax&0xFF00)|(m[si]&0xFF); si++; ip++; break;
+                          case 0xE2: cx--; if(cx>0) ip+=(byte)m[ip+1]+2; else ip+=2; break;
                           case 0xE8: int rel=(m[ip+1]&0xFF)|((m[ip+2]&0xFF)<<8); m[--sp]=(byte)((ip+3)>>8); m[--sp]=(byte)(ip+3); ip+=3+rel; break;
                           case 0xC3: ip=(m[sp++]&0xFF)|((m[sp++]&0xFF)<<8); break;
                           case 0x3C: zf=(ax&0xFF)==(m[ip+1]&0xFF); ip+=2; break;
@@ -200,7 +198,6 @@ jobs:
                           default: ip++; break;
                       }
                   }
-                  int memHigh(int addr) { return m[addr] & 0xFF; }
                   void handleInt(int n) {
                       if(n==0x10) {
                           if(((ax>>8)&0xFF)==0x0E) {
@@ -210,26 +207,24 @@ jobs:
                           } else { lines.clear(); lines.add(""); }
                       } else if(n==0x16) {
                           if(!keys.isEmpty()) { ax=(ax&0xFF00)|keys.poll(); }
-                          else ip-=2; // Ждем клавишу, не двигая IP
+                          else ip-=2;
                       }
                   }
               }
           }
-          JAVA
+          EOF
 
-          # Gradle
           echo "android.useAndroidX=true" > gradle.properties
           echo "include ':app'" > settings.gradle
-          cat > build.gradle << 'XML'
+          cat > build.gradle << 'EOF'
           buildscript { repositories { google(); mavenCentral() }; dependencies { classpath 'com.android.tools.build:gradle:8.2.2' } }
           allprojects { repositories { google(); mavenCentral() } }
-          XML
-          cat > app/build.gradle << 'XML'
+          EOF
+          cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application' }
           android { namespace 'com.tinyos.vm'; compileSdk 34; defaultConfig { applicationId "com.tinyos.vm"; minSdk 24; targetSdk 34 } }
           dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
-          APP:
-          XML
+          EOF
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -248,5 +243,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: DimOS-v12-SwitchMode
+          name: DimOS-v12-Final
           path: app/build/outputs/apk/debug/app-debug.apk
