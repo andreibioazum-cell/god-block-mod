@@ -235,111 +235,153 @@ jobs:
           #[no_mangle]
           #[link_section = ".text.entry"]
           pub extern "C" fn aetheria_main(fb_addr: *mut u32, kb_addr: *mut u8, width: u32, height: u32) -> ! {
-              let bg = 0xFF0D0D14u32; let green = 0xFF4AF626u32; let white = 0xFFFFFFFFu32; let red = 0xFFF38BA8u32;
-              let mut cursor_y = 20; let scale = 2; let font_w = 8 * scale; let font_h = 8 * scale;
-              draw_rect(fb_addr, width, 0, 0, width, height, bg);
-              draw_text(fb_addr, width, 20, cursor_y, "AetheriaOS v0.5 VM Active", green, scale);
-              cursor_y += font_h + 10;
+              let bg = 0xFF0D0D14u32; 
+              let green = 0xFF4AF626u32; 
+              let white = 0xFFFFFFFFu32; 
+              let red = 0xFFF38BA8u32;
+              let scale = 2u32; 
+              let font_w = 8 * scale; 
+              let font_h = 8 * scale;
               let prompt = "root@aetheria:~# ";
-              let mut input_buf = [0u8; 64]; let mut input_len = 0;
+              
+              let mut input_buf = [0u8; 64]; 
+              let mut input_len = 0usize;
+              let mut cursor_y = 40u32;
               let mut tick = 0u32;
-              let mut last_cursor_state = false;
+              let mut cursor_visible = false;
+              
+              // Начальная отрисовка
+              draw_rect(fb_addr, width, 0, 0, width, height, bg);
+              draw_text(fb_addr, width, 20, 20, "AetheriaOS v0.5 - Type 'help' for commands", green, scale);
               
               loop {
-                  // Перерисовка курсора только каждые 30000 циклов (медленнее)
-                  if tick % 30000 == 0 {
-                      let new_cursor_state = (tick / 30000) % 2 == 0;
-                      if new_cursor_state != last_cursor_state {
-                          last_cursor_state = new_cursor_state;
-                          // Очищаем старую строку полностью перед перерисовкой
-                          draw_rect(fb_addr, width, 0, cursor_y, width, font_h + 5, bg);
-                          draw_text(fb_addr, width, 20, cursor_y, prompt, green, scale);
+                  // Обработка клавиатуры
+                  let key = unsafe { read_volatile(kb_addr) };
+                  
+                  if key != 0 {
+                      unsafe { write_volatile(kb_addr, 0); }
+                      
+                      if key == 10 { // ENTER
+                          // Скрываем курсор перед обработкой
+                          draw_rect(fb_addr, width, 0, cursor_y, width, font_h, bg);
                           
-                          // Рисуем введенный текст
+                          // Обрабатываем команду только если что-то введено
                           if input_len > 0 {
-                              if let Ok(s) = str::from_utf8(&input_buf[..input_len]) {
-                                  draw_text(fb_addr, width, 20 + (prompt.len() as u32) * font_w, cursor_y, s, white, scale);
+                              if let Ok(cmd_str) = str::from_utf8(&input_buf[..input_len]) {
+                                  let cmd = cmd_str.trim();
+                                  
+                                  // Показываем введённую команду
+                                  draw_text(fb_addr, width, 20, cursor_y, prompt, green, scale);
+                                  draw_text(fb_addr, width, 20 + (prompt.len() as u32) * font_w, cursor_y, cmd, white, scale);
+                                  cursor_y += font_h + 8;
+                                  
+                                  // Выполняем команду
+                                  if cmd == "help" {
+                                      draw_text(fb_addr, width, 20, cursor_y, "Commands: ls, run <file>, clear", white, scale);
+                                      cursor_y += font_h + 5;
+                                      draw_text(fb_addr, width, 20, cursor_y, "Files: sysinfo.ae, snake.ae, bounce.ae", white, scale);
+                                      cursor_y += font_h + 8;
+                                  } else if cmd == "ls" {
+                                      for file in FILESYSTEM.iter() {
+                                          draw_text(fb_addr, width, 20, cursor_y, file.name, white, scale);
+                                          cursor_y += font_h + 5;
+                                      }
+                                      cursor_y += 3;
+                                  } else if cmd.starts_with("run ") && cmd.len() > 4 {
+                                      let file_name = &cmd[4..];
+                                      let mut found = false;
+                                      
+                                      for file in FILESYSTEM.iter() {
+                                          if file.name == file_name {
+                                              found = true;
+                                              // Полная очистка для игры
+                                              draw_rect(fb_addr, width, 0, 0, width, height, bg);
+                                              
+                                              // Запускаем скрипт
+                                              run_script(fb_addr, kb_addr, width, height, file.content);
+                                              
+                                              // Восстановление после выхода
+                                              draw_rect(fb_addr, width, 0, 0, width, height, bg);
+                                              draw_text(fb_addr, width, 20, 20, "AetheriaOS v0.5 - Type 'help' for commands", green, scale);
+                                              cursor_y = 40;
+                                              break;
+                                          }
+                                      }
+                                      
+                                      if !found {
+                                          draw_text(fb_addr, width, 20, cursor_y, "File not found", red, scale);
+                                          cursor_y += font_h + 8;
+                                      }
+                                  } else if cmd == "clear" {
+                                      draw_rect(fb_addr, width, 0, 0, width, height, bg);
+                                      draw_text(fb_addr, width, 20, 20, "AetheriaOS v0.5 - Type 'help' for commands", green, scale);
+                                      cursor_y = 40;
+                                  } else {
+                                      draw_text(fb_addr, width, 20, cursor_y, "Unknown command. Type 'help'", red, scale);
+                                      cursor_y += font_h + 8;
+                                  }
                               }
                           }
                           
-                          // Рисуем курсор
-                          let cursor_x = 20 + (prompt.len() as u32 + input_len as u32) * font_w;
-                          if last_cursor_state {
-                              draw_rect(fb_addr, width, cursor_x, cursor_y + font_h - 3, font_w / 2, 3, green);
+                          // Очищаем буфер ввода
+                          input_len = 0;
+                          
+                          // Проверка переполнения экрана
+                          if cursor_y > height - 60 {
+                              draw_rect(fb_addr, width, 0, 0, width, height, bg);
+                              draw_text(fb_addr, width, 20, 20, "AetheriaOS v0.5 - Type 'help' for commands", green, scale);
+                              cursor_y = 40;
+                          }
+                          
+                          tick = 0;
+                          cursor_visible = false;
+                          
+                      } else if key == 8 { // BACKSPACE
+                          if input_len > 0 {
+                              // Очищаем строку
+                              draw_rect(fb_addr, width, 0, cursor_y, width, font_h, bg);
+                              input_len -= 1;
+                              tick = 0;
+                              cursor_visible = false;
+                          }
+                      } else if key >= 32 && key <= 126 { // Печатные символы
+                          if input_len < 63 {
+                              input_buf[input_len] = key;
+                              input_len += 1;
+                              
+                              // Очищаем строку и перерисовываем
+                              draw_rect(fb_addr, width, 0, cursor_y, width, font_h, bg);
+                              tick = 0;
+                              cursor_visible = false;
                           }
                       }
                   }
                   
-                  let key = unsafe { read_volatile(kb_addr) };
-                  if key != 0 {
-                      unsafe { write_volatile(kb_addr, 0); }
+                  // Отрисовка промпта и ввода каждый кадр
+                  if tick % 5000 == 0 {
+                      // Очищаем строку
+                      draw_rect(fb_addr, width, 0, cursor_y, width, font_h, bg);
                       
-                      // Очищаем строку для обновления
-                      draw_rect(fb_addr, width, 0, cursor_y, width, font_h + 5, bg);
-                      
-                      if key == 10 { // ENTER
-                          cursor_y += font_h + 5;
-                          if let Ok(cmd_str) = str::from_utf8(&input_buf[..input_len]) {
-                              let cmd = cmd_str.trim();
-                              if cmd == "help" {
-                                  draw_text(fb_addr, width, 20, cursor_y, "Run Apps: run sysinfo.ae | run snake.ae | run bounce.ae | ls | clear", white, scale);
-                                  cursor_y += font_h + 5;
-                              } else if cmd == "ls" {
-                                  for file in FILESYSTEM.iter() {
-                                      draw_text(fb_addr, width, 20, cursor_y, file.name, white, scale);
-                                      cursor_y += font_h + 5;
-                                  }
-                              } else if cmd.starts_with("run ") {
-                                  let file_name = &cmd[4..];
-                                  for file in FILESYSTEM.iter() {
-                                      if file.name == file_name {
-                                          // Полная очистка экрана перед запуском
-                                          draw_rect(fb_addr, width, 0, 0, width, height, bg);
-                                          run_script(fb_addr, kb_addr, width, height, file.content);
-                                          // Восстановление экрана после игры
-                                          draw_rect(fb_addr, width, 0, 0, width, height, bg); 
-                                          cursor_y = 20;
-                                          draw_text(fb_addr, width, 20, cursor_y, "AetheriaOS v0.5 VM Active", green, scale);
-                                          cursor_y += font_h + 10;
-                                          break;
-                                      }
-                                  }
-                              } else if cmd == "clear" {
-                                  draw_rect(fb_addr, width, 0, 0, width, height, bg); 
-                                  cursor_y = 20;
-                                  draw_text(fb_addr, width, 20, cursor_y, "AetheriaOS v0.5 VM Active", green, scale);
-                                  cursor_y += font_h + 10;
-                              } else if cmd.len() > 0 {
-                                  draw_text(fb_addr, width, 20, cursor_y, "Command not found", red, scale); 
-                                  cursor_y += font_h + 5;
-                              }
-                          }
-                          input_len = 0;
-                          if cursor_y > height - 40 { 
-                              draw_rect(fb_addr, width, 0, 0, width, height, bg); 
-                              cursor_y = 20;
-                              draw_text(fb_addr, width, 20, cursor_y, "AetheriaOS v0.5 VM Active", green, scale);
-                              cursor_y += font_h + 10;
-                          }
-                      } else if key == 8 { // BACKSPACE
-                          if input_len > 0 { input_len -= 1; }
-                      } else { 
-                          if input_len < 64 && key >= 32 && key <= 126 {
-                              input_buf[input_len] = key;
-                              input_len += 1;
-                          }
-                      }
-                      
-                      // Перерисовка после ввода
+                      // Рисуем промпт
                       draw_text(fb_addr, width, 20, cursor_y, prompt, green, scale);
+                      
+                      // Рисуем введённый текст
                       if input_len > 0 {
                           if let Ok(s) = str::from_utf8(&input_buf[..input_len]) {
                               draw_text(fb_addr, width, 20 + (prompt.len() as u32) * font_w, cursor_y, s, white, scale);
                           }
                       }
                       
-                      tick = 0; // Сброс для мгновенного отображения курсора
-                      last_cursor_state = true;
+                      // Мигание курсора (медленнее)
+                      if tick % 40000 == 0 {
+                          cursor_visible = !cursor_visible;
+                      }
+                      
+                      // Рисуем курсор
+                      if cursor_visible {
+                          let cursor_x = 20 + (prompt.len() as u32 + input_len as u32) * font_w;
+                          draw_rect(fb_addr, width, cursor_x, cursor_y + font_h - 3, font_w / 2, 3, green);
+                      }
                   }
                   
                   tick += 1;
