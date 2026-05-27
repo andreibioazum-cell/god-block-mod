@@ -1,188 +1,519 @@
-name: Roblox Selective Shield - No Internet Break
-on: [push, workflow_dispatch]
+name: AetheriaOS - OS with AetherScript VM
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  build-apk:
+  build-aetheria-os:
+    name: Build AetheriaOS (Interactive)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: set up JDK 17
-        uses: actions/setup-java@v3
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK
+      
+      - name: Setup Android SDK & Tools
         uses: android-actions/setup-android@v3
-
-      - name: Prepare Project
-        run: |
-          mkdir -p app/src/main/java/com/shield/roblox app/src/main/cpp app/src/main/res/values
+        with:
+          packages: 'platform-tools build-tools;34.0.0 platforms;android-34 ndk;25.2.9519653'
+      
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          target: aarch64-unknown-none
+          override: true
+          components: rust-src
           
-          # --- Gradle Config ---
-          echo "include ':app'" > settings.gradle
-          cat > build.gradle << 'EOF'
-          buildscript { repositories { google(); mavenCentral() }; dependencies { classpath 'com.android.tools.build:gradle:8.2.2' } }
-          allprojects { repositories { google(); mavenCentral() } }
+      # ===== 1. СОЗДАЁМ ЯДРО AETHERIAOS (Rust) =====
+      - name: Create & Build Rust Kernel
+        run: |
+          mkdir -p aetheria_kernel/src
+          
+          # ШРИФТ
+          cat > aetheria_kernel/src/font.rs << 'EOF'
+          pub fn get_char_bitmap(c: char) -> [u8; 8] {
+              let idx = c as usize;
+              if idx >= 32 && idx <= 126 { FONT_DATA[idx - 32] } else { [0xFF; 8] }
+          }
+          const FONT_DATA: [[u8; 8]; 95] = [
+              [0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00], [0x18,0x3C,0x3C,0x18,0x18,0x00,0x18,0x00],
+              [0x66,0x66,0x24,0x00,0x00,0x00,0x00,0x00], [0x6C,0x6C,0xFE,0x6C,0xFE,0x6C,0x6C,0x00],
+              [0x18,0x3E,0x60,0x3C,0x06,0x7C,0x18,0x00], [0x00,0xC6,0xCC,0x18,0x30,0x66,0xC6,0x00],
+              [0x38,0x6C,0x38,0x76,0xDC,0xCC,0x76,0x00], [0x18,0x18,0x30,0x00,0x00,0x00,0x00,0x00],
+              [0x0C,0x18,0x30,0x30,0x30,0x18,0x0C,0x00], [0x30,0x18,0x0C,0x0C,0x0C,0x18,0x30,0x00],
+              [0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00], [0x00,0x18,0x18,0x7E,0x18,0x18,0x00,0x00],
+              [0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30], [0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00],
+              [0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00], [0x00,0x06,0x0C,0x18,0x30,0x60,0x00,0x00],
+              [0x3C,0x66,0x6E,0x76,0x66,0x66,0x3C,0x00], [0x18,0x38,0x18,0x18,0x18,0x18,0x7E,0x00],
+              [0x3C,0x66,0x06,0x0C,0x30,0x60,0xFF,0x00], [0x3C,0x66,0x06,0x1C,0x06,0x66,0x3C,0x00],
+              [0x0C,0x1C,0x3C,0x6C,0xFF,0x0C,0x0C,0x00], [0xFF,0x60,0x7C,0x06,0x06,0x66,0x3C,0x00],
+              [0x3C,0x66,0x60,0x7C,0x66,0x66,0x3C,0x00], [0xFF,0x06,0x0C,0x18,0x30,0x30,0x30,0x00],
+              [0x3C,0x66,0x66,0x3C,0x66,0x66,0x3C,0x00], [0x3C,0x66,0x66,0x3E,0x06,0x66,0x3C,0x00],
+              [0x00,0x18,0x18,0x00,0x18,0x18,0x00,0x00], [0x00,0x18,0x18,0x00,0x18,0x18,0x30,0x00],
+              [0x00,0x0C,0x18,0x30,0x18,0x0C,0x00,0x00], [0x00,0x00,0x7E,0x00,0x7E,0x00,0x00,0x00],
+              [0x00,0x30,0x18,0x0C,0x18,0x30,0x00,0x00], [0x3C,0x66,0x06,0x0C,0x18,0x00,0x18,0x00],
+              [0x3C,0x66,0x6E,0x6E,0x60,0x66,0x3C,0x00], [0x3C,0x66,0x66,0x7E,0x66,0x66,0x66,0x00],
+              [0x7C,0x66,0x66,0x7C,0x66,0x66,0x7C,0x00], [0x3C,0x66,0x60,0x60,0x60,0x66,0x3C,0x00],
+              [0x78,0x6C,0x66,0x66,0x66,0x6C,0x78,0x00], [0x7E,0x60,0x60,0x78,0x60,0x60,0x7E,0x00],
+              [0x7E,0x60,0x60,0x78,0x60,0x60,0x60,0x00], [0x3C,0x66,0x60,0x6E,0x66,0x66,0x3E,0x00],
+              [0x66,0x66,0x66,0x7E,0x66,0x66,0x66,0x00], [0x3E,0x18,0x18,0x18,0x18,0x18,0x3E,0x00],
+              [0x0F,0x06,0x06,0x06,0x66,0x66,0x3C,0x00], [0x66,0x6C,0x78,0x70,0x78,0x6C,0x66,0x00],
+              [0x60,0x60,0x60,0x60,0x60,0x60,0x7E,0x00], [0x63,0x77,0x7F,0x6B,0x63,0x63,0x63,0x00],
+              [0x66,0x76,0x7E,0x7E,0x6E,0x66,0x66,0x00], [0x3C,0x66,0x66,0x66,0x66,0x66,0x3C,0x00],
+              [0x7C,0x66,0x66,0x7C,0x60,0x60,0x60,0x00], [0x3C,0x66,0x66,0x66,0x66,0x3C,0x0E,0x00],
+              [0x7C,0x66,0x66,0x7C,0x78,0x6C,0x66,0x00], [0x3C,0x66,0x60,0x3C,0x06,0x66,0x3C,0x00],
+              [0x7E,0x18,0x18,0x18,0x18,0x18,0x18,0x00], [0x66,0x66,0x66,0x66,0x66,0x66,0x3C,0x00],
+              [0x66,0x66,0x66,0x66,0x66,0x3C,0x18,0x00], [0x63,0x63,0x6B,0x7F,0x77,0x63,0x63,0x00],
+              [0x66,0x66,0x3C,0x18,0x3C,0x66,0x66,0x00], [0x66,0x66,0x66,0x3C,0x18,0x18,0x18,0x00],
+              [0x7E,0x06,0x0C,0x18,0x30,0x60,0x7E,0x00], [0x3C,0x30,0x30,0x30,0x30,0x30,0x3C,0x00],
+              [0x00,0x60,0x30,0x18,0x0C,0x06,0x00,0x00], [0x3C,0x0C,0x0C,0x0C,0x0C,0x0C,0x3C,0x00],
+              [0x18,0x3C,0x66,0x00,0x00,0x00,0x00,0x00], [0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xFF],
+              [0x30,0x18,0x0C,0x00,0x00,0x00,0x00,0x00], [0x00,0x00,0x3C,0x06,0x3E,0x66,0x3E,0x00],
+              [0x60,0x60,0x7C,0x66,0x66,0x66,0x7C,0x00], [0x00,0x00,0x3C,0x60,0x60,0x60,0x3C,0x00],
+              [0x06,0x06,0x3E,0x66,0x66,0x66,0x3E,0x00], [0x00,0x00,0x3C,0x66,0x7E,0x60,0x3C,0x00],
+              [0x1C,0x30,0x7C,0x30,0x30,0x30,0x30,0x00], [0x00,0x00,0x3E,0x66,0x66,0x3E,0x06,0x3C],
+              [0x60,0x60,0x7C,0x66,0x66,0x66,0x66,0x00], [0x18,0x00,0x38,0x18,0x18,0x18,0x3C,0x00],
+              [0x0C,0x00,0x1C,0x0C,0x0C,0x0C,0x0C,0x38], [0x60,0x60,0x66,0x6C,0x78,0x6C,0x66,0x00],
+              [0x38,0x18,0x18,0x18,0x18,0x18,0x3C,0x00], [0x00,0x00,0x6C,0xFE,0xD6,0xD6,0xC6,0x00],
+              [0x00,0x00,0x7C,0x66,0x66,0x66,0x66,0x00], [0x00,0x00,0x3C,0x66,0x66,0x66,0x3C,0x00],
+              [0x00,0x00,0x7C,0x66,0x66,0x7C,0x60,0x60], [0x00,0x00,0x3E,0x66,0x66,0x3E,0x06,0x06],
+              [0x00,0x00,0x7C,0x66,0x60,0x60,0x60,0x00], [0x00,0x00,0x3C,0x60,0x3C,0x06,0x3C,0x00],
+              [0x30,0x30,0x7C,0x30,0x30,0x30,0x1C,0x00], [0x00,0x00,0x66,0x66,0x66,0x66,0x3E,0x00],
+              [0x00,0x00,0x66,0x66,0x66,0x3C,0x18,0x00], [0x00,0x00,0xC6,0xD6,0xD6,0xFE,0x6C,0x00],
+              [0x00,0x00,0x66,0x3C,0x18,0x3C,0x66,0x00], [0x00,0x00,0x66,0x66,0x66,0x3E,0x06,0x3C],
+              [0x00,0x00,0x7E,0x0C,0x18,0x30,0x7E,0x00], [0x0E,0x18,0x18,0x70,0x18,0x18,0x0E,0x00],
+              [0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00], [0x70,0x18,0x18,0x0E,0x18,0x18,0x70,0x00],
+              [0x3A,0x6E,0x00,0x00,0x00,0x00,0x00,0x00]
+          ];
           EOF
-
-          cat > app/build.gradle << 'EOF'
-          plugins { id 'com.android.application' }
-          android {
-              namespace 'com.shield.roblox'
-              compileSdk 34
-              defaultConfig {
-                  applicationId "com.shield.roblox"
-                  minSdk 24
-                  targetSdk 34
-                  versionCode 2
-                  versionName "2.0-Selective"
-                  externalNativeBuild { cmake { cppFlags "-O3 -fPIC" } }
+          
+          cat > aetheria_kernel/src/lib.rs << 'EOF'
+          #![no_std]
+          
+          mod font;
+          use core::panic::PanicInfo;
+          use core::ptr::{read_volatile, write_volatile};
+          use core::str;
+          
+          #[panic_handler] fn panic(_info: &PanicInfo) -> ! { loop { core::hint::spin_loop(); } }
+          #[no_mangle] pub unsafe extern "C" fn memset(dest: *mut u8, c: i32, n: usize) -> *mut u8 { for i in 0..n { *dest.add(i) = c as u8; } dest }
+          #[no_mangle] pub unsafe extern "C" fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 { for i in 0..n { *dest.add(i) = *src.add(i); } dest }
+          
+          fn draw_rect(fb: *mut u32, fb_w: u32, x: u32, y: u32, w: u32, h: u32, color: u32) {
+              for iy in y..(y+h) {
+                  for ix in x..(x+w) { unsafe { write_volatile(fb.add((iy * fb_w + ix) as usize), color); } }
               }
-              externalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } }
           }
-          EOF
-
-          # --- C++ Engine (DPI Scrambler) ---
-          cat > app/src/main/cpp/scrambler.cpp << 'EOF'
-          #include <jni.h>
-          #include <android/log.h>
-          #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "RobloxShield", __VA_ARGS__)
-
-          extern "C" JNIEXPORT void JNICALL
-          Java_com_shield_roblox_ShieldService_startScrambler(JNIEnv* env, jobject obj, jint tun_fd) {
-              LOGI("Scrambler started for Roblox traffic. Fragmenting packets...");
-              // Здесь работает логика ByeDPI: нарезка SNI и фейковые пакеты
-          }
-          EOF
-
-          cat > app/src/main/cpp/CMakeLists.txt << 'EOF'
-          cmake_minimum_required(VERSION 3.22)
-          project(scrambler)
-          add_library(scrambler SHARED scrambler.cpp)
-          target_link_libraries(scrambler log)
-          EOF
-
-          # --- Java VpnService (С ИСПРАВЛЕНИЕМ ИНТЕРНЕТА) ---
-          cat > app/src/main/java/com/shield/roblox/ShieldService.java << 'EOF'
-          package com.shield.roblox;
-          import android.net.VpnService;
-          import android.content.Intent;
-          import android.os.ParcelFileDescriptor;
-          import android.util.Log;
-
-          public class ShieldService extends VpnService {
-              static { System.loadLibrary("scrambler"); }
-              private native void startScrambler(int fd);
-              private ParcelFileDescriptor vpnInterface;
-
-              @Override
-              public int onStartCommand(Intent intent, int flags, int startId) {
-                  Builder builder = new Builder();
-                  try {
-                      builder.setSession("RobloxShield")
-                             .addAddress("10.0.0.1", 24)
-                             .addDnsServer("1.1.1.1")
-                             .addDnsServer("8.8.8.8")
-                             // ГЛАВНАЯ ФИШКА: Это приложение защищает ТОЛЬКО Roblox
-                             .addAllowedApplication("com.roblox.client") 
-                             // Можно добавить и браузер, если нужно:
-                             // .addAllowedApplication("com.android.chrome")
-                             .setMtu(1500);
-
-                      vpnInterface = builder.establish();
-                      
-                      new Thread(() -> {
-                          startScrambler(vpnInterface.getFd());
-                      }).start();
-                      
-                      Log.i("Shield", "VPN Started for Roblox only");
-                  } catch (Exception e) {
-                      Log.e("Shield", "Error: " + e.getMessage());
+          
+          fn draw_char(fb: *mut u32, fb_w: u32, x: u32, y: u32, c: char, color: u32, scale: u32) {
+              let bitmap = font::get_char_bitmap(c);
+              for row in 0..8 {
+                  for col in 0..8 {
+                      if (bitmap[row] & (1 << (7 - col))) != 0 {
+                          draw_rect(fb, fb_w, x + col * scale, y + (row as u32) * scale, scale, scale, color);
+                      }
                   }
-                  return START_STICKY;
               }
+          }
+          
+          fn draw_text(fb: *mut u32, fb_w: u32, x: u32, y: u32, text: &str, color: u32, scale: u32) {
+              let mut cx = x;
+              for c in text.chars() { draw_char(fb, fb_w, cx, y, c, color, scale); cx += 8 * scale; }
+          }
+          
+          // ================= ВИРТУАЛЬНАЯ МАШИНА AETHERSCRIPT =================
+          fn get_val(s: &str, r: &[i32; 26]) -> i32 {
+              let b = s.as_bytes();
+              if b.len() == 1 && b[0] >= b'a' && b[0] <= b'z' { return r[(b[0] - b'a') as usize]; }
+              let mut v = 0; let mut sign = 1;
+              for (i, &ch) in b.iter().enumerate() {
+                  if i==0 && ch==b'-' { sign = -1; continue; }
+                  if ch >= b'0' && ch <= b'9' { v = v*10 + (ch-b'0') as i32; }
+              }
+              v * sign
+          }
 
-              @Override
-              public void onDestroy() {
-                  try { if(vpnInterface != null) vpnInterface.close(); } catch(Exception e) {}
-                  super.onDestroy();
+          fn run_script(fb: *mut u32, kb: *mut u8, w: u32, h: u32, code: &str) {
+              let mut lines = [""; 64]; let mut line_count = 0;
+              for l in code.split('\n') {
+                  let t = l.trim();
+                  if t.len() > 0 && !t.starts_with("//") { if line_count < 64 { lines[line_count] = t; line_count += 1; } }
+              }
+              
+              let mut mem = [0i32; 1024]; let mut regs = [0i32; 26];
+              let mut pc = 0; let mut seed = 12345u32;
+              let colors = [0xFF0D0D14, 0xFFFFFFFF, 0xFF4AF626, 0xFFF38BA8, 0xFF89B4FA, 0xFFF9E2AF, 0xFF94E2D5];
+
+              while pc < line_count {
+                  let key = unsafe { read_volatile(kb) };
+                  if key != 0 { unsafe { write_volatile(kb, 0); } }
+                  
+                  let mut exit = false; let mut jumped = false;
+                  
+                  for statement in lines[pc].split(';') {
+                      let stmt = statement.trim();
+                      if stmt.len() == 0 { continue; }
+                      
+                      let mut words = [""; 15]; let mut wc = 0;
+                      for word in stmt.split(' ') { if word.len() > 0 && wc < 15 { words[wc] = word; wc += 1; } }
+                      
+                      let mut cur = &words[0..wc];
+                      loop {
+                          if cur.len() == 0 { break; }
+                          let cmd = cur[0];
+                          
+                          if cmd == "if" && cur.len() > 4 {
+                              let v1 = get_val(cur[1], &regs); let op = cur[2]; let v2 = get_val(cur[3], &regs);
+                              let cond = if op == "==" { v1 == v2 } else if op == "!=" { v1 != v2 } else if op == ">" { v1 > v2 } else if op == "<" { v1 < v2 } else { false };
+                              if cond { cur = &cur[4..]; continue; } else { break; }
+                          } else if cmd == "set" && cur.len() > 2 {
+                              let var = cur[1].as_bytes()[0];
+                              if var >= b'a' && var <= b'z' { regs[(var - b'a') as usize] = get_val(cur[2], &regs); } break;
+                          } else if cmd == "op" && cur.len() > 3 {
+                              let var = cur[1].as_bytes()[0];
+                              if var >= b'a' && var <= b'z' {
+                                  let idx = (var - b'a') as usize; let v2 = get_val(cur[3], &regs);
+                                  if cur[2] == "add" { regs[idx] += v2; } else if cur[2] == "sub" { regs[idx] -= v2; } else if cur[2] == "mul" { regs[idx] *= v2; }
+                              } break;
+                          } else if cmd == "arr_set" && cur.len() > 3 {
+                              let base = get_val(cur[1], &regs) as usize; let idx = get_val(cur[2], &regs) as usize; let val = get_val(cur[3], &regs);
+                              if base+idx < 1024 { mem[base+idx] = val; } break;
+                          } else if cmd == "arr_get" && cur.len() > 3 {
+                              let var = cur[1].as_bytes()[0];
+                              if var >= b'a' && var <= b'z' {
+                                  let base = get_val(cur[2], &regs) as usize; let idx = get_val(cur[3], &regs) as usize;
+                                  if base+idx < 1024 { regs[(var-b'a') as usize] = mem[base+idx]; }
+                              } break;
+                          } else if cmd == "key" && cur.len() > 1 {
+                              let var = cur[1].as_bytes()[0];
+                              if var >= b'a' && var <= b'z' { regs[(var - b'a') as usize] = key as i32; } break;
+                          } else if cmd == "rand" && cur.len() > 2 {
+                              let var = cur[1].as_bytes()[0];
+                              if var >= b'a' && var <= b'z' {
+                                  seed = (seed.wrapping_mul(1103515245).wrapping_add(12345)) % 2147483648;
+                                  regs[(var - b'a') as usize] = (seed % (get_val(cur[2], &regs) as u32)) as i32;
+                              } break;
+                          } else if cmd == "clear" && cur.len() > 1 {
+                              let c = get_val(cur[1], &regs) as usize; draw_rect(fb, w, 0, 0, w, h, colors[c % colors.len()]); break;
+                          } else if cmd == "grid" && cur.len() > 3 {
+                              let rx = get_val(cur[1], &regs) as u32 * 20; let ry = get_val(cur[2], &regs) as u32 * 20;
+                              let rc = get_val(cur[3], &regs) as usize; draw_rect(fb, w, rx, ry, 20, 20, colors[rc % colors.len()]); break;
+                          } else if cmd == "text" && cur.len() > 4 {
+                              let rx = get_val(cur[1], &regs) as u32; let ry = get_val(cur[2], &regs) as u32;
+                              let rc = get_val(cur[3], &regs) as usize; 
+                              let mut tmp = [0u8; 64]; let mut ti = 0;
+                              for b in cur[4].as_bytes() { if ti < 64 { tmp[ti] = if *b==b'_' { b' ' } else { *b }; ti+=1; } }
+                              if let Ok(s) = str::from_utf8(&tmp[..ti]) { draw_text(fb, w, rx, ry, s, colors[rc % colors.len()], 2); } break;
+                          } else if cmd == "delay" && cur.len() > 1 {
+                              let ms = get_val(cur[1], &regs); for _ in 0..(ms * 50000) { core::hint::spin_loop(); } break;
+                          } else if cmd == "jmp" && cur.len() > 1 {
+                              pc = get_val(cur[1], &regs) as usize; jumped = true; break;
+                          } else if cmd == "exit" {
+                              exit = true; break;
+                          } else { break; }
+                      }
+                      if exit || jumped { break; }
+                  }
+                  if exit { break; }
+                  if !jumped { pc += 1; }
+              }
+          }
+          
+          struct VFile { name: &'static str, content: &'static str }
+          
+          // ВСЕ ПРИЛОЖЕНИЯ НАПИСАНЫ НА НАШЕМ ВСТРОЕННОМ ЯЗЫКЕ!
+          const FILESYSTEM: [VFile; 3] = [
+              VFile { name: "sysinfo.ae", content: "clear 0\ntext 20 20 4 AETHERIA_OS_-_SYSTEM_MONITOR\ntext 20 80 1 Kernel_:_Bare-Metal_Rust_0.5\ntext 20 110 1 Arch_:_aarch64_(ARM64)\ntext 20 140 1 Mem_:_Direct_Framebuffer\ntext 20 170 1 VM_:_AetherScript_Active\ntext 20 280 3 Press_Q_to_exit...\nkey k\nif k == 113 exit 0\ndelay 50\njmp 8" },
+              VFile { name: "snake.ae", content: "set l 3; arr_set 0 0 15; arr_set 256 0 10; arr_set 0 1 14; arr_set 256 1 10; arr_set 0 2 13; arr_set 256 2 10\nset d 1; set a 30; set b 15; set q 0\nclear 0; text 20 10 4 AETHERIA_SNAKE_[W,A,S,D]\nkey k\nif k == 119 if d != 2 set d 0\nif k == 100 if d != 3 set d 1\nif k == 115 if d != 0 set d 2\nif k == 97 if d != 1 set d 3\nif k == 113 exit 0\nset i l; op i sub 1\nif i == 0 jmp 13\nset j i; op j sub 1; arr_get x 0 j; arr_set 0 i x; arr_get y 256 j; arr_set 256 i y\nop i sub 1; jmp 10\narr_get x 0 0; arr_get y 256 0\nif d == 0 op y sub 1\nif d == 1 op x add 1\nif d == 2 op y add 1\nif d == 3 op x sub 1\nif x < 0 set q 1\nif x > 63 set q 1\nif y < 2 set q 1\nif y > 35 set q 1\nif q == 1 text 400 300 3 GAME_OVER; delay 2000; exit 0\narr_set 0 0 x; arr_set 256 0 y\nif x != a jmp 26\nif y != b jmp 26; op l add 1; rand a 60; op a add 2; rand b 30; op b add 3\ngrid a b 3; set i 0\nif i == l jmp 30\narr_get x 0 i; arr_get y 256 i; grid x y 2\nop i add 1; jmp 27\ndelay 60; jmp 2" },
+              VFile { name: "bounce.ae", content: "set x 10\nset y 10\nset a 1\nset b 1\nclear 0\ngrid x y 4\nop x add a\nop y add b\nif x > 60 set a -1\nif x < 1 set a 1\nif y > 30 set b -1\nif y < 1 set b 1\nkey k\nif k == 113 exit 0\ndelay 30\njmp 4" }
+          ];
+          
+          #[no_mangle]
+          #[link_section = ".text.entry"]
+          pub extern "C" fn aetheria_main(fb_addr: *mut u32, kb_addr: *mut u8, width: u32, height: u32) -> ! {
+              let bg = 0xFF0D0D14u32; let green = 0xFF4AF626u32; let white = 0xFFFFFFFFu32; let red = 0xFFF38BA8u32;
+              let mut cursor_y = 20; let scale = 2; let font_w = 8 * scale; let font_h = 8 * scale;
+              draw_rect(fb_addr, width, 0, 0, width, height, bg);
+              draw_text(fb_addr, width, 20, cursor_y, "AetheriaOS v0.5 VM Active", green, scale);
+              cursor_y += font_h + 10;
+              let prompt = "root@aetheria:~# ";
+              let mut input_buf = [0u8; 64]; let mut input_len = 0;
+              draw_text(fb_addr, width, 20, cursor_y, prompt, green, scale);
+              let mut tick = 0;
+              
+              loop {
+                  let key = unsafe { read_volatile(kb_addr) };
+                  if key != 0 {
+                      unsafe { write_volatile(kb_addr, 0); }
+                      if key == 10 { // ENTER
+                          cursor_y += font_h + 5;
+                          if let Ok(cmd_str) = str::from_utf8(&input_buf[..input_len]) {
+                              let cmd = cmd_str.trim();
+                              if cmd == "help" {
+                                  draw_text(fb_addr, width, 20, cursor_y, "Run Apps: run sysinfo.ae | run snake.ae | run bounce.ae | ls | clear", white, scale);
+                                  cursor_y += font_h + 5;
+                              } else if cmd == "ls" {
+                                  for file in FILESYSTEM.iter() {
+                                      draw_text(fb_addr, width, 20, cursor_y, file.name, white, scale);
+                                      cursor_y += font_h + 5;
+                                  }
+                              } else if cmd.starts_with("run ") {
+                                  let file_name = &cmd[4..];
+                                  for file in FILESYSTEM.iter() {
+                                      if file.name == file_name {
+                                          run_script(fb_addr, kb_addr, width, height, file.content);
+                                          draw_rect(fb_addr, width, 0, 0, width, height, bg); cursor_y = 20; break;
+                                      }
+                                  }
+                              } else if cmd == "clear" {
+                                  draw_rect(fb_addr, width, 0, 0, width, height, bg); cursor_y = 20;
+                              } else if cmd.len() > 0 {
+                                  draw_text(fb_addr, width, 20, cursor_y, "Command not found", red, scale); cursor_y += font_h + 5;
+                              }
+                          }
+                          input_len = 0;
+                          if cursor_y > height - 40 { draw_rect(fb_addr, width, 0, 0, width, height, bg); cursor_y = 20; }
+                          draw_text(fb_addr, width, 20, cursor_y, prompt, green, scale);
+                      } else if key == 8 { // BACKSPACE
+                          if input_len > 0 {
+                              input_len -= 1;
+                              draw_rect(fb_addr, width, 20 + (prompt.len() as u32 + input_len as u32) * font_w, cursor_y, font_w, font_h, bg);
+                          }
+                      } else { 
+                          if input_len < 64 && key >= 32 && key <= 126 {
+                              input_buf[input_len] = key;
+                              draw_char(fb_addr, width, 20 + (prompt.len() as u32 + input_len as u32) * font_w, cursor_y, key as char, white, scale);
+                              input_len += 1;
+                          }
+                      }
+                  }
+                  let cursor_x = 20 + (prompt.len() as u32 + input_len as u32) * font_w;
+                  let cursor_color = if (tick / 500) % 2 == 0 { white } else { bg };
+                  draw_rect(fb_addr, width, cursor_x, cursor_y, font_w, 4, cursor_color);
+                  tick += 1;
               }
           }
           EOF
-
-          # --- MainActivity ---
-          cat > app/src/main/java/com/shield/roblox/MainActivity.java << 'EOF'
-          package com.shield.roblox;
+          
+          cat > aetheria_kernel/linker.ld << 'EOF'
+          ENTRY(aetheria_main);
+          SECTIONS { . = 0x00000000; .text : { *(.text.entry) *(.text*) } .rodata : { *(.rodata*) } .data : { *(.data*) } .bss : { *(.bss*) *(COMMON) } /DISCARD/ : { *(.eh_frame) *(.comment) } }
+          EOF
+          
+          cat > aetheria_kernel/Cargo.toml << 'EOF'
+          [package]
+          name = "aetheria_kernel"
+          version = "0.1.0"
+          edition = "2021"
+          [lib]
+          crate-type = ["staticlib"]
+          [profile.release]
+          opt-level = 3
+          panic = "abort"
+          EOF
+          
+          cd aetheria_kernel
+          cargo build --release --target aarch64-unknown-none
+          LLD=$(find $ANDROID_HOME/ndk -name "ld.lld" | head -n 1)
+          OBJCOPY=$(find $ANDROID_HOME/ndk -name "llvm-objcopy" | head -n 1)
+          $LLD -T linker.ld -o kernel.elf target/aarch64-unknown-none/release/libaetheria_kernel.a
+          $OBJCOPY -O binary kernel.elf kernel.bin
+          cd ..
+      
+      # ===== 2. СОЗДАЁМ ИНТЕРФЕЙС АНДРОИДА СО ВСТРОЕННЫМ D-PAD =====
+      - name: Create Android Wrapper
+        run: |
+          mkdir -p app/src/main/{java/com/aetheria/loader,cpp,res/layout,res/raw}
+          cp aetheria_kernel/kernel.bin app/src/main/res/raw/kernel_bin
+          
+          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
+          <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent" android:background="#000">
+              <SurfaceView android:id="@+id/surface" android:layout_width="match_parent" android:layout_height="match_parent" />
+              <Button android:id="@+id/btnQ" android:layout_width="80dp" android:layout_height="50dp" android:text="QUIT"
+                  android:layout_alignParentTop="true" android:layout_alignParentRight="true" android:layout_margin="20dp" 
+                  android:background="#88FF0000" android:textColor="#FFF" android:textStyle="bold"/>
+              <RelativeLayout android:layout_width="200dp" android:layout_height="200dp" 
+                  android:layout_alignParentBottom="true" android:layout_alignParentRight="true" android:layout_margin="20dp">
+                  <Button android:id="@+id/btnW" android:layout_width="65dp" android:layout_height="65dp" android:text="UP" android:layout_centerHorizontal="true" android:background="#55FFFFFF" android:textColor="#FFF"/>
+                  <Button android:id="@+id/btnS" android:layout_width="65dp" android:layout_height="65dp" android:text="DOWN" android:layout_centerHorizontal="true" android:layout_alignParentBottom="true" android:background="#55FFFFFF" android:textColor="#FFF"/>
+                  <Button android:id="@+id/btnA" android:layout_width="65dp" android:layout_height="65dp" android:text="LEFT" android:layout_alignParentLeft="true" android:layout_centerVertical="true" android:background="#55FFFFFF" android:textColor="#FFF"/>
+                  <Button android:id="@+id/btnD" android:layout_width="65dp" android:layout_height="65dp" android:text="RIGHT" android:layout_alignParentRight="true" android:layout_centerVertical="true" android:background="#55FFFFFF" android:textColor="#FFF"/>
+              </RelativeLayout>
+          </RelativeLayout>
+          EOF
+          
+          cat > app/src/main/java/com/aetheria/loader/MainActivity.java << 'EOF'
+          package com.aetheria.loader;
           import android.app.Activity;
+          import android.content.Context;
           import android.os.Bundle;
-          import android.net.VpnService;
-          import android.content.Intent;
-          import android.widget.Button;
-          import android.widget.TextView;
-          import android.graphics.Color;
-          import android.view.Gravity;
-          import android.widget.LinearLayout;
-
+          import android.graphics.*;
+          import android.view.*;
+          import android.view.inputmethod.InputMethodManager;
+          import java.nio.ByteBuffer;
+          
           public class MainActivity extends Activity {
+              static { System.loadLibrary("aetheria_loader"); }
+              private native void startKernel(byte[] kernelData, ByteBuffer frameBuffer, ByteBuffer kbBuffer, int width, int height);
+              private SurfaceView surface;
+              private ByteBuffer frameBuffer, kbBuffer; 
+              private Bitmap bitmap;
+              
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
-                  LinearLayout root = new LinearLayout(this);
-                  root.setOrientation(LinearLayout.VERTICAL);
-                  root.setGravity(Gravity.CENTER);
-                  root.setBackgroundColor(Color.parseColor("#121212"));
-
-                  TextView tv = new TextView(this);
-                  tv.setText("ROBLOX ULTRA SHIELD\n(Selective Mode)");
-                  tv.setTextColor(Color.WHITE);
-                  tv.setGravity(Gravity.CENTER);
-                  tv.setPadding(0,0,0,50);
-
-                  Button btn = new Button(this);
-                  btn.setText("ВКЛЮЧИТЬ ОБХОД");
-                  btn.setBackgroundColor(Color.parseColor("#4CAF50"));
-                  btn.setTextColor(Color.WHITE);
-
-                  btn.setOnClickListener(v -> {
-                      Intent intent = VpnService.prepare(this);
-                      if (intent != null) startActivityForResult(intent, 0);
-                      else startService(new Intent(this, ShieldService.class));
+                  setContentView(R.layout.activity_main);
+                  surface = findViewById(R.id.surface);
+                  
+                  frameBuffer = ByteBuffer.allocateDirect(1280 * 720 * 4);
+                  kbBuffer = ByteBuffer.allocateDirect(1);
+                  bitmap = Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888);
+                  
+                  surface.setFocusable(true);
+                  surface.setFocusableInTouchMode(true);
+                  surface.setOnTouchListener((v, e) -> {
+                      surface.requestFocus();
+                      InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                      imm.showSoftInput(surface, InputMethodManager.SHOW_IMPLICIT);
+                      return true;
                   });
-
-                  root.addView(tv);
-                  root.addView(btn);
-                  setContentView(root);
+                  
+                  View.OnTouchListener dpad = (v, e) -> {
+                      if (e.getAction() == MotionEvent.ACTION_DOWN) {
+                          if(v.getId() == R.id.btnW) kbBuffer.put(0, (byte)'w');
+                          if(v.getId() == R.id.btnS) kbBuffer.put(0, (byte)'s');
+                          if(v.getId() == R.id.btnA) kbBuffer.put(0, (byte)'a');
+                          if(v.getId() == R.id.btnD) kbBuffer.put(0, (byte)'d');
+                          if(v.getId() == R.id.btnQ) kbBuffer.put(0, (byte)'q');
+                      }
+                      return false;
+                  };
+                  findViewById(R.id.btnW).setOnTouchListener(dpad);
+                  findViewById(R.id.btnS).setOnTouchListener(dpad);
+                  findViewById(R.id.btnA).setOnTouchListener(dpad);
+                  findViewById(R.id.btnD).setOnTouchListener(dpad);
+                  findViewById(R.id.btnQ).setOnTouchListener(dpad);
+                  
+                  surface.setOnKeyListener((v, keyCode, event) -> {
+                      if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                          int c = event.getUnicodeChar();
+                          if (keyCode == KeyEvent.KEYCODE_DEL) c = 8;
+                          if (keyCode == KeyEvent.KEYCODE_ENTER) c = 10;
+                          if (c != 0) kbBuffer.put(0, (byte)c);
+                          return true;
+                      }
+                      return false;
+                  });
+                  
+                  surface.getHolder().addCallback(new SurfaceHolder.Callback() {
+                      @Override
+                      public void surfaceCreated(SurfaceHolder h) {
+                          new Thread(() -> {
+                              try {
+                                  byte[] kernel = getResources().openRawResource(R.raw.kernel_bin).readAllBytes();
+                                  startKernel(kernel, frameBuffer, kbBuffer, 1280, 720);
+                              } catch(Exception e) {}
+                          }).start();
+                          
+                          new Thread(() -> {
+                              while(true) {
+                                  Canvas c = h.lockCanvas();
+                                  if (c != null) {
+                                      frameBuffer.position(0);
+                                      bitmap.copyPixelsFromBuffer(frameBuffer);
+                                      c.drawBitmap(bitmap, null, new Rect(0,0, surface.getWidth(), surface.getHeight()), null);
+                                      h.unlockCanvasAndPost(c);
+                                  }
+                                  try { Thread.sleep(16); } catch(Exception e){}
+                              }
+                          }).start();
+                      }
+                      @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h2) {}
+                      @Override public void surfaceDestroyed(SurfaceHolder h) {}
+                  });
               }
           }
           EOF
-
-          # --- Manifest ---
+          
+          cat > app/src/main/cpp/loader.cpp << 'EOF'
+          #include <jni.h>
+          #include <sys/mman.h>
+          #include <cstring>
+          extern "C" JNIEXPORT void JNICALL
+          Java_com_aetheria_loader_MainActivity_startKernel(JNIEnv* env, jobject, jbyteArray kernelData, jobject fb, jobject kb, jint w, jint h) {
+              jsize len = env->GetArrayLength(kernelData);
+              jbyte* bytes = env->GetByteArrayElements(kernelData, nullptr);
+              void* fb_ptr = env->GetDirectBufferAddress(fb);
+              void* kb_ptr = env->GetDirectBufferAddress(kb);
+              void* exec_mem = mmap(nullptr, len, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+              memcpy(exec_mem, bytes, len);
+              __builtin___clear_cache((char*)exec_mem, (char*)exec_mem + len);
+              typedef void (*KernelMain)(void*, void*, uint32_t, uint32_t);
+              KernelMain kmain = (KernelMain)exec_mem;
+              kmain(fb_ptr, kb_ptr, w, h);
+          }
+          EOF
+          
+          cat > app/src/main/cpp/CMakeLists.txt << 'EOF'
+          cmake_minimum_required(VERSION 3.22)
+          project(aetheria_loader)
+          add_library(aetheria_loader SHARED loader.cpp)
+          target_link_libraries(aetheria_loader log)
+          target_compile_options(aetheria_loader PRIVATE -O3 -fPIC)
+          EOF
+          
           cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-              <application android:label="Roblox Shield" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
-                  <service android:name=".ShieldService" android:permission="android.permission.BIND_VPN_SERVICE" android:exported="true"/>
-                  <activity android:name=".MainActivity" android:exported="true">
+              <application android:label="AetheriaOS" android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+                  <activity android:name="com.aetheria.loader.MainActivity" android:exported="true" android:screenOrientation="landscape">
                       <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
                   </activity>
               </application>
           </manifest>
           EOF
+          
+          cat > app/build.gradle << 'EOF'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'com.aetheria.loader'
+              compileSdk 34
+              defaultConfig { applicationId 'com.aetheria.loader'; minSdk 24; targetSdk 34; externalNativeBuild { cmake { cppFlags "-O3 -fPIC" } } }
+              externalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } }
+          }
+          EOF
+          
+          cat > build.gradle << 'EOF'
+          buildscript { repositories { google(); mavenCentral() } dependencies { classpath 'com.android.tools.build:gradle:8.2.2' } }
+          allprojects { repositories { google(); mavenCentral() } }
+          EOF
+          echo 'include ":app"' > settings.gradle
 
-      - name: Generate Wrapper
-        run: gradle wrapper --gradle-version 8.5
-
+      # ===== 3. СБОРКА APK =====
       - name: Build APK
         run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
+          unzip -q gradle-8.5-bin.zip
+          export PATH="$PWD/gradle-8.5/bin:$PATH"
+          gradle wrapper --gradle-version 8.5
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: Upload APK
+      # ===== 4. ПАКОВКА АРХИВА =====
+      - name: Package Release
+        run: |
+          mkdir -p AetheriaOS_Release
+          cp app/build/outputs/apk/debug/app-debug.apk AetheriaOS_Release/AetheriaOS-Apps.apk
+          cp aetheria_kernel/kernel.bin AetheriaOS_Release/kernel.bin
+          
+      - name: Upload OS Package
         uses: actions/upload-artifact@v4
         with:
-          name: Roblox-Shield-Selective
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: AetheriaOS-Release
+          path: AetheriaOS_Release/
+          retention-days: 30
