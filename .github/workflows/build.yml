@@ -22,7 +22,7 @@ jobs:
         run: |
           mkdir -p app/src/main/java/com/shield/roblox app/src/main/cpp app/src/main/res/values
           
-          # --- СИСТЕМНЫЕ НАСТРОЙКИ (Gradle) ---
+          # Настройки Gradle
           cat > settings.gradle << 'EOF'
           include ':app'
           EOF
@@ -54,22 +54,12 @@ jobs:
           }
           EOF
 
-          # --- КОД ЗАПУТЫВАНИЯ (C++) ---
-          # Это то, что режет пакеты и путает РКН без смены IP
+          # Код C++ для запутывания (ByeDPI logic)
           cat > app/src/main/cpp/scrambler.cpp << 'EOF'
           #include <jni.h>
-          #include <string>
-          #include <sys/socket.h>
-          #include <netinet/in.h>
-          #include <unistd.h>
-
           extern "C" JNIEXPORT void JNICALL
           Java_com_shield_roblox_ShieldService_startScrambler(JNIEnv* env, jobject obj, jint tun_fd) {
-              // Здесь логика ByeDPI на стероидах:
-              // 1. Разбиение SNI
-              // 2. Добавление фейковых TCP-фреймов
-              // 3. TTL-шокирование (чтобы РКН не видел ответа)
-              // (Для примера оставляем запуск движка)
+              // Здесь будет движок фрагментации
           }
           EOF
 
@@ -80,54 +70,27 @@ jobs:
           target_link_libraries(scrambler log)
           EOF
 
-          # --- КОД VPN-СЕРВИСА (Java) ---
+          # Java код сервиса
           cat > app/src/main/java/com/shield/roblox/ShieldService.java << 'EOF'
           package com.shield.roblox;
           import android.net.VpnService;
           import android.os.ParcelFileDescriptor;
           import android.content.Intent;
-
           public class ShieldService extends VpnService {
               static { System.loadLibrary("scrambler"); }
               private native void startScrambler(int fd);
-
               @Override
               public int onStartCommand(Intent intent, int flags, int startId) {
                   Builder builder = new Builder();
-                  builder.setSession("RobloxShield")
-                         .addAddress("10.0.0.1", 24)
-                         .addDnsServer("1.1.1.1")
-                         .addRoute("0.0.0.0", 0);
-                  
+                  builder.setSession("RobloxShield").addAddress("10.0.0.1", 24).addDnsServer("1.1.1.1").addRoute("0.0.0.0", 0);
                   ParcelFileDescriptor vpnInterface = builder.establish();
-                  startScrambler(vpnInterface.getFd());
+                  if (vpnInterface != null) startScrambler(vpnInterface.getFd());
                   return START_STICKY;
               }
           }
           EOF
 
-          # --- МАНИФЕСТ ---
-          cat > app/src/main/AndroidManifest.xml << 'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <uses-permission android:name="android.permission.BIND_VPN_SERVICE"/>
-              <application android:label="Roblox Ultra Shield">
-                  <service android:name=".ShieldService" 
-                           android:permission="android.permission.BIND_VPN_SERVICE"
-                           android:exported="true">
-                      <intent-filter><action android:name="android.net.VpnService"/></intent-filter>
-                  </service>
-                  <activity android:name=".MainActivity" android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
-
-          # --- ГЛАВНЫЙ ЭКРАН ---
+          # MainActivity
           cat > app/src/main/java/com/shield/roblox/MainActivity.java << 'EOF'
           package com.shield.roblox;
           import android.app.Activity;
@@ -135,11 +98,12 @@ jobs:
           import android.net.VpnService;
           import android.content.Intent;
           import android.widget.Button;
-
+          import android.widget.LinearLayout;
           public class MainActivity extends Activity {
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
+                  LinearLayout layout = new LinearLayout(this);
                   Button btn = new Button(this);
                   btn.setText("ВКЛЮЧИТЬ ЗАЩИТУ ROBLOX");
                   btn.setOnClickListener(v -> {
@@ -147,20 +111,41 @@ jobs:
                       if (intent != null) startActivityForResult(intent, 0);
                       else startService(new Intent(this, ShieldService.class));
                   });
-                  setContentView(btn);
+                  layout.addView(btn);
+                  setContentView(layout);
               }
           }
           EOF
 
-      # 2. ЗАПУСКАЕМ РЕАЛЬНУЮ СБОРКУ
+          # Манифест
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <application android:label="Roblox Ultra Shield">
+                  <service android:name=".ShieldService" android:permission="android.permission.BIND_VPN_SERVICE" android:exported="true">
+                      <intent-filter><action android:name="android.net.VpnService"/></intent-filter>
+                  </service>
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+      # 2. ГЕНЕРИРУЕМ GRADLE WRAPPER (Исправление твоей ошибки)
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.5
+
+      # 3. СБОРКА APK
       - name: Build APK
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      # 3. ВЫГРУЖАЕМ ГОТОВЫЙ ФАЙЛ
-      - name: Upload Result
+      # 4. СОХРАНЕНИЕ РЕЗУЛЬТАТА
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Roblox-Shield-Final-APK
+          name: Roblox-Shield-Build
           path: app/build/outputs/apk/debug/app-debug.apk
