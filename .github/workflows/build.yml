@@ -1,4 +1,4 @@
-name: MadGPT_V9_God_Mode_With_FilePicker
+name: MadGPT_V10_MultiFile_Mode
 on: [push, workflow_dispatch]
 
 jobs:
@@ -8,7 +8,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create God-Mode AI Structure
+      - name: Create Multi-File AI Structure
         run: |
           mkdir -p app/src/main/java/com/madgpt/godmode
           mkdir -p app/src/main/res/layout
@@ -38,20 +38,20 @@ jobs:
                   minSdk 26 
                   targetSdk 34 
                   versionCode 1 
-                  versionName "9.0-PICKER" 
+                  versionName "10.0-MULTI" 
               }
           }
           EOF
 
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="#050505" android:padding="10dp">
-              <TextView android:id="@+id/stats" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Engine: V9-GOD | Status: Ready" android:textColor="#00FFCC" android:textSize="10sp" android:fontFamily="monospace"/>
+              <TextView android:id="@+id/stats" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Engine: V10-MULTI | Status: Ready" android:textColor="#00FFCC" android:textSize="10sp" android:fontFamily="monospace"/>
               <ProgressBar android:id="@+id/trainProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="6dp" android:visibility="gone" android:layout_marginTop="5dp"/>
               <ScrollView android:id="@+id/chatScroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="10dp">
-                  <TextView android:id="@+id/terminal" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFF" android:textSize="13sp" android:fontFamily="monospace" android:text="[SYSTEM]: Нажми ОБУЧИТЬ, чтобы выбрать .txt файл\n"/>
+                  <TextView android:id="@+id/terminal" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#FFF" android:textSize="13sp" android:fontFamily="monospace" android:text="[SYSTEM]: Выбери один или несколько .txt файлов для обучения\n"/>
               </ScrollView>
               <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-                  <Button android:id="@+id/btnTrain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ОБУЧИТЬ" android:textSize="10sp" android:backgroundTint="#222"/>
+                  <Button android:id="@+id/btnTrain" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ОБУЧИТЬ (+)" android:textSize="10sp" android:backgroundTint="#222"/>
                   <EditText android:id="@+id/input" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Запрос..." android:textColor="#FFF" android:background="#111" android:padding="12dp" android:layout_margin="5dp"/>
                   <Button android:id="@+id/btnSend" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text=">>" android:backgroundTint="#007AFF"/>
               </LinearLayout>
@@ -68,28 +68,32 @@ jobs:
               public void process(String text) {
                   String[] words = text.split("(?<=[\\s\\p{Punct}])|(?=[\\s\\p{Punct}])");
                   for(String w : words) {
-                      if(!w.trim().isEmpty() && !t2i.containsKey(w)) {
-                          t2i.put(w, t2i.size());
-                          i2t.add(w);
+                      String trimmed = w.trim();
+                      if(!trimmed.isEmpty() && !t2i.containsKey(trimmed)) {
+                          t2i.put(trimmed, t2i.size());
+                          i2t.add(trimmed);
                       }
                   }
               }
           }
           EOF
 
-          # --- ОСНОВНОЙ КОД С ВЫБОРОМ ФАЙЛА ---
+          # --- ОСНОВНОЙ КОД С MULTI-FILE PICKER ---
           cat > app/src/main/java/com/madgpt/godmode/MainActivity.java << 'EOF'
           package com.madgpt.godmode;
           import android.app.Activity;
+          import android.content.ClipData;
           import android.content.Intent;
           import android.net.Uri;
           import android.os.Bundle;
           import android.view.View;
           import android.widget.*;
           import java.io.*;
+          import java.util.ArrayList;
+          import java.util.List;
 
           public class MainActivity extends Activity {
-              private static final int PICK_TXT_FILE = 1;
+              private static final int PICK_TXT_FILES = 1;
               Tokenizer tokenizer = new Tokenizer();
               TextView terminal; ProgressBar pb;
 
@@ -103,15 +107,15 @@ jobs:
                   findViewById(R.id.btnTrain).setOnClickListener(v -> {
                       Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                       intent.setType("text/plain");
-                      startActivityForResult(intent, PICK_TXT_FILE);
+                      intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); // РАЗРЕШИТЬ МНОГО ФАЙЛОВ
+                      startActivityForResult(Intent.createChooser(intent, "Выбери файлы"), PICK_TXT_FILES);
                   });
 
                   findViewById(R.id.btnSend).setOnClickListener(v -> {
                       EditText input = findViewById(R.id.input);
                       String q = input.getText().toString();
                       if(tokenizer.i2t.isEmpty()) {
-                          terminal.append("\n[!] Сначала обучи модель на файле!");
-                          return;
+                          terminal.append("\n[!] Мозг пуст. Выбери файлы!"); return;
                       }
                       terminal.append("\n[YOU]: " + q + "\n[BOT]: " + tokenizer.i2t.get(new java.util.Random().nextInt(tokenizer.i2t.size())));
                       input.setText("");
@@ -121,33 +125,49 @@ jobs:
               @Override
               protected void onActivityResult(int requestCode, int resultCode, Intent data) {
                   super.onActivityResult(requestCode, resultCode, data);
-                  if (requestCode == PICK_TXT_FILE && resultCode == RESULT_OK && data != null) {
-                      Uri uri = data.getData();
-                      loadAndTrain(uri);
+                  if (requestCode == PICK_TXT_FILES && resultCode == RESULT_OK && data != null) {
+                      List<Uri> uris = new ArrayList<>();
+                      if (data.getClipData() != null) { // Если выбрано несколько
+                          int count = data.getClipData().getItemCount();
+                          for (int i = 0; i < count; i++) uris.add(data.getClipData().getItemAt(i).getUri());
+                      } else if (data.getData() != null) { // Если выбран один
+                          uris.add(data.getData());
+                      }
+                      trainOnMultipleFiles(uris);
                   }
               }
 
-              private void loadAndTrain(Uri uri) {
+              private void trainOnMultipleFiles(List<Uri> uris) {
                   pb.setVisibility(View.VISIBLE);
-                  terminal.append("\n[SYSTEM]: Чтение файла...");
+                  terminal.append("\n[SYSTEM]: Начало массовой загрузки (" + uris.size() + " файлов)...");
+                  
                   new Thread(() -> {
                       try {
-                          InputStream is = getContentResolver().openInputStream(uri);
-                          BufferedReader reader = new BufferedReader(new InputStreamReader(is));
-                          StringBuilder sb = new StringBuilder();
-                          String line;
-                          while ((line = reader.readLine()) != null) { sb.append(line).append(" "); }
-                          is.close();
-                          
-                          tokenizer.process(sb.toString());
+                          int count = 0;
+                          for (Uri uri : uris) {
+                              count++;
+                              final int current = count;
+                              runOnUiThread(() -> terminal.append("\n[→] Обработка файла " + current + "/" + uris.size()));
+                              
+                              InputStream is = getContentResolver().openInputStream(uri);
+                              BufferedReader reader = new BufferedReader(new InputStreamReader(is));
+                              StringBuilder sb = new StringBuilder();
+                              String line;
+                              while ((line = reader.readLine()) != null) { sb.append(line).append(" "); }
+                              is.close();
+                              tokenizer.process(sb.toString());
+                          }
                           
                           runOnUiThread(() -> {
                               pb.setVisibility(View.GONE);
-                              terminal.append("\n[SUCCESS]: Файл загружен!");
-                              terminal.append("\n[INFO]: Токенов в словаре: " + tokenizer.i2t.size());
+                              terminal.append("\n\n***********************************");
+                              terminal.append("\n✅ ОБУЧЕНИЕ ПОЛНОСТЬЮ ЗАВЕРШЕНО!");
+                              terminal.append("\n[INFO]: База знаний обновлена.");
+                              terminal.append("\n[INFO]: Уникальных токенов: " + tokenizer.i2t.size());
+                              terminal.append("\n***********************************\n");
                           });
                       } catch (Exception e) {
-                          runOnUiThread(() -> terminal.append("\n[ERROR]: Ошибка чтения!"));
+                          runOnUiThread(() -> terminal.append("\n[ERROR]: Произошла ошибка при обучении!"));
                       }
                   }).start();
               }
@@ -182,5 +202,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MadGPT_V9_With_Picker
+          name: MadGPT_V10_MultiPicker
           path: app/build/outputs/apk/debug/app-debug.apk
