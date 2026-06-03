@@ -1,629 +1,849 @@
-name: AetheriaOS - OS with AetherScript VM
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+name: Secure_Vault_Ultimate
+on: [push, workflow_dispatch]
 
 jobs:
-  build-aetheria-os:
-    name: Build AetheriaOS (Interactive)
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
-      - name: Setup Android SDK & Tools
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools build-tools;34.0.0 platforms;android-34 ndk;25.2.9519653'
-      
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          target: aarch64-unknown-none
-          override: true
-          components: rust-src
-          
-      # ===== 1. СОЗДАЁМ ЯДРО AETHERIAOS (Rust) =====
-      - name: Create & Build Rust Kernel
-        run: |
-          mkdir -p aetheria_kernel/src
-          
-          # ШРИФТ
-          cat > aetheria_kernel/src/font.rs << 'EOF'
-          pub fn get_char_bitmap(c: char) -> [u8; 8] {
-              let idx = c as usize;
-              if idx >= 32 && idx <= 126 { FONT_DATA[idx - 32] } else { [0xFF; 8] }
-          }
-          const FONT_DATA: [[u8; 8]; 95] = [
-              [0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00], [0x18,0x3C,0x3C,0x18,0x18,0x00,0x18,0x00],
-              [0x66,0x66,0x24,0x00,0x00,0x00,0x00,0x00], [0x6C,0x6C,0xFE,0x6C,0xFE,0x6C,0x6C,0x00],
-              [0x18,0x3E,0x60,0x3C,0x06,0x7C,0x18,0x00], [0x00,0xC6,0xCC,0x18,0x30,0x66,0xC6,0x00],
-              [0x38,0x6C,0x38,0x76,0xDC,0xCC,0x76,0x00], [0x18,0x18,0x30,0x00,0x00,0x00,0x00,0x00],
-              [0x0C,0x18,0x30,0x30,0x30,0x18,0x0C,0x00], [0x30,0x18,0x0C,0x0C,0x0C,0x18,0x30,0x00],
-              [0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00], [0x00,0x18,0x18,0x7E,0x18,0x18,0x00,0x00],
-              [0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30], [0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00],
-              [0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00], [0x00,0x06,0x0C,0x18,0x30,0x60,0x00,0x00],
-              [0x3C,0x66,0x6E,0x76,0x66,0x66,0x3C,0x00], [0x18,0x38,0x18,0x18,0x18,0x18,0x7E,0x00],
-              [0x3C,0x66,0x06,0x0C,0x30,0x60,0xFF,0x00], [0x3C,0x66,0x06,0x1C,0x06,0x66,0x3C,0x00],
-              [0x0C,0x1C,0x3C,0x6C,0xFF,0x0C,0x0C,0x00], [0xFF,0x60,0x7C,0x06,0x06,0x66,0x3C,0x00],
-              [0x3C,0x66,0x60,0x7C,0x66,0x66,0x3C,0x00], [0xFF,0x06,0x0C,0x18,0x30,0x30,0x30,0x00],
-              [0x3C,0x66,0x66,0x3C,0x66,0x66,0x3C,0x00], [0x3C,0x66,0x66,0x3E,0x06,0x66,0x3C,0x00],
-              [0x00,0x18,0x18,0x00,0x18,0x18,0x00,0x00], [0x00,0x18,0x18,0x00,0x18,0x18,0x30,0x00],
-              [0x00,0x0C,0x18,0x30,0x18,0x0C,0x00,0x00], [0x00,0x00,0x7E,0x00,0x7E,0x00,0x00,0x00],
-              [0x00,0x30,0x18,0x0C,0x18,0x30,0x00,0x00], [0x3C,0x66,0x06,0x0C,0x18,0x00,0x18,0x00],
-              [0x3C,0x66,0x6E,0x6E,0x60,0x66,0x3C,0x00], [0x3C,0x66,0x66,0x7E,0x66,0x66,0x66,0x00],
-              [0x7C,0x66,0x66,0x7C,0x66,0x66,0x7C,0x00], [0x3C,0x66,0x60,0x60,0x60,0x66,0x3C,0x00],
-              [0x78,0x6C,0x66,0x66,0x66,0x6C,0x78,0x00], [0x7E,0x60,0x60,0x78,0x60,0x60,0x7E,0x00],
-              [0x7E,0x60,0x60,0x78,0x60,0x60,0x60,0x00], [0x3C,0x66,0x60,0x6E,0x66,0x66,0x3E,0x00],
-              [0x66,0x66,0x66,0x7E,0x66,0x66,0x66,0x00], [0x3E,0x18,0x18,0x18,0x18,0x18,0x3E,0x00],
-              [0x0F,0x06,0x06,0x06,0x66,0x66,0x3C,0x00], [0x66,0x6C,0x78,0x70,0x78,0x6C,0x66,0x00],
-              [0x60,0x60,0x60,0x60,0x60,0x60,0x7E,0x00], [0x63,0x77,0x7F,0x6B,0x63,0x63,0x63,0x00],
-              [0x66,0x76,0x7E,0x7E,0x6E,0x66,0x66,0x00], [0x3C,0x66,0x66,0x66,0x66,0x66,0x3C,0x00],
-              [0x7C,0x66,0x66,0x7C,0x60,0x60,0x60,0x00], [0x3C,0x66,0x66,0x66,0x66,0x3C,0x0E,0x00],
-              [0x7C,0x66,0x66,0x7C,0x78,0x6C,0x66,0x00], [0x3C,0x66,0x60,0x3C,0x06,0x66,0x3C,0x00],
-              [0x7E,0x18,0x18,0x18,0x18,0x18,0x18,0x00], [0x66,0x66,0x66,0x66,0x66,0x66,0x3C,0x00],
-              [0x66,0x66,0x66,0x66,0x66,0x3C,0x18,0x00], [0x63,0x63,0x6B,0x7F,0x77,0x63,0x63,0x00],
-              [0x66,0x66,0x3C,0x18,0x3C,0x66,0x66,0x00], [0x66,0x66,0x66,0x3C,0x18,0x18,0x18,0x00],
-              [0x7E,0x06,0x0C,0x18,0x30,0x60,0x7E,0x00], [0x3C,0x30,0x30,0x30,0x30,0x30,0x3C,0x00],
-              [0x00,0x60,0x30,0x18,0x0C,0x06,0x00,0x00], [0x3C,0x0C,0x0C,0x0C,0x0C,0x0C,0x3C,0x00],
-              [0x18,0x3C,0x66,0x00,0x00,0x00,0x00,0x00], [0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xFF],
-              [0x30,0x18,0x0C,0x00,0x00,0x00,0x00,0x00], [0x00,0x00,0x3C,0x06,0x3E,0x66,0x3E,0x00],
-              [0x60,0x60,0x7C,0x66,0x66,0x66,0x7C,0x00], [0x00,0x00,0x3C,0x60,0x60,0x60,0x3C,0x00],
-              [0x06,0x06,0x3E,0x66,0x66,0x66,0x3E,0x00], [0x00,0x00,0x3C,0x66,0x7E,0x60,0x3C,0x00],
-              [0x1C,0x30,0x7C,0x30,0x30,0x30,0x30,0x00], [0x00,0x00,0x3E,0x66,0x66,0x3E,0x06,0x3C],
-              [0x60,0x60,0x7C,0x66,0x66,0x66,0x66,0x00], [0x18,0x00,0x38,0x18,0x18,0x18,0x3C,0x00],
-              [0x0C,0x00,0x1C,0x0C,0x0C,0x0C,0x0C,0x38], [0x60,0x60,0x66,0x6C,0x78,0x6C,0x66,0x00],
-              [0x38,0x18,0x18,0x18,0x18,0x18,0x3C,0x00], [0x00,0x00,0x6C,0xFE,0xD6,0xD6,0xC6,0x00],
-              [0x00,0x00,0x7C,0x66,0x66,0x66,0x66,0x00], [0x00,0x00,0x3C,0x66,0x66,0x66,0x3C,0x00],
-              [0x00,0x00,0x7C,0x66,0x66,0x7C,0x60,0x60], [0x00,0x00,0x3E,0x66,0x66,0x3E,0x06,0x06],
-              [0x00,0x00,0x7C,0x66,0x60,0x60,0x60,0x00], [0x00,0x00,0x3C,0x60,0x3C,0x06,0x3C,0x00],
-              [0x30,0x30,0x7C,0x30,0x30,0x30,0x1C,0x00], [0x00,0x00,0x66,0x66,0x66,0x66,0x3E,0x00],
-              [0x00,0x00,0x66,0x66,0x66,0x3C,0x18,0x00], [0x00,0x00,0xC6,0xD6,0xD6,0xFE,0x6C,0x00],
-              [0x00,0x00,0x66,0x3C,0x18,0x3C,0x66,0x00], [0x00,0x00,0x66,0x66,0x66,0x3E,0x06,0x3C],
-              [0x00,0x00,0x7E,0x0C,0x18,0x30,0x7E,0x00], [0x0E,0x18,0x18,0x70,0x18,0x18,0x0E,0x00],
-              [0x18,0x18,0x18,0x00,0x18,0x18,0x18,0x00], [0x70,0x18,0x18,0x0E,0x18,0x18,0x70,0x00],
-              [0x3A,0x6E,0x00,0x00,0x00,0x00,0x00,0x00]
-          ];
-          EOF
-          
-          cat > aetheria_kernel/src/lib.rs << 'EOF'
-          #![no_std]
-          
-          mod font;
-          use core::panic::PanicInfo;
-          use core::ptr::{read_volatile, write_volatile};
-          use core::str;
-          
-          #[panic_handler] fn panic(_info: &PanicInfo) -> ! { loop { core::hint::spin_loop(); } }
-          #[no_mangle] pub unsafe extern "C" fn memset(dest: *mut u8, c: i32, n: usize) -> *mut u8 { for i in 0..n { *dest.add(i) = c as u8; } dest }
-          #[no_mangle] pub unsafe extern "C" fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 { for i in 0..n { *dest.add(i) = *src.add(i); } dest }
-          
-          fn draw_rect(fb: *mut u32, fb_w: u32, x: u32, y: u32, w: u32, h: u32, color: u32) {
-              for iy in y..(y+h) {
-                  for ix in x..(x+w) { unsafe { write_volatile(fb.add((iy * fb_w + ix) as usize), color); } }
-              }
-          }
-          
-          fn draw_char(fb: *mut u32, fb_w: u32, x: u32, y: u32, c: char, color: u32, scale: u32) {
-              let bitmap = font::get_char_bitmap(c);
-              for row in 0..8 {
-                  for col in 0..8 {
-                      if (bitmap[row] & (1 << (7 - col))) != 0 {
-                          draw_rect(fb, fb_w, x + col * scale, y + (row as u32) * scale, scale, scale, color);
-                      }
-                  }
-              }
-          }
-          
-          fn draw_text(fb: *mut u32, fb_w: u32, x: u32, y: u32, text: &str, color: u32, scale: u32) {
-              let mut cx = x;
-              for c in text.chars() { draw_char(fb, fb_w, cx, y, c, color, scale); cx += 8 * scale; }
-          }
-          
-          // ================= ВИРТУАЛЬНАЯ МАШИНА AETHERSCRIPT =================
-          fn get_val(s: &str, r: &[i32; 26]) -> i32 {
-              let b = s.as_bytes();
-              if b.len() == 1 && b[0] >= b'a' && b[0] <= b'z' { return r[(b[0] - b'a') as usize]; }
-              let mut v = 0; let mut sign = 1;
-              for (i, &ch) in b.iter().enumerate() {
-                  if i==0 && ch==b'-' { sign = -1; continue; }
-                  if ch >= b'0' && ch <= b'9' { v = v*10 + (ch-b'0') as i32; }
-              }
-              v * sign
-          }
 
-          fn run_script(fb: *mut u32, kb: *mut u8, w: u32, h: u32, code: &str) {
-              let mut lines = [""; 64]; let mut line_count = 0;
-              for l in code.split('\n') {
-                  let t = l.trim();
-                  if t.len() > 0 && !t.starts_with("//") { if line_count < 64 { lines[line_count] = t; line_count += 1; } }
-              }
-              
-              let mut mem = [0i32; 1024]; let mut regs = [0i32; 26];
-              let mut pc = 0; let mut seed = 12345u32;
-              let colors = [0xFF0D0D14, 0xFFFFFFFF, 0xFF4AF626, 0xFFF38BA8, 0xFF89B4FA, 0xFFF9E2AF, 0xFF94E2D5];
-
-              while pc < line_count {
-                  let key = unsafe { read_volatile(kb) };
-                  if key != 0 { unsafe { write_volatile(kb, 0); } }
-                  
-                  let mut exit = false; let mut jumped = false;
-                  
-                  for statement in lines[pc].split(';') {
-                      let stmt = statement.trim();
-                      if stmt.len() == 0 { continue; }
-                      
-                      let mut words = [""; 15]; let mut wc = 0;
-                      for word in stmt.split(' ') { if word.len() > 0 && wc < 15 { words[wc] = word; wc += 1; } }
-                      
-                      let mut cur = &words[0..wc];
-                      loop {
-                          if cur.len() == 0 { break; }
-                          let cmd = cur[0];
-                          
-                          if cmd == "if" && cur.len() > 4 {
-                              let v1 = get_val(cur[1], &regs); let op = cur[2]; let v2 = get_val(cur[3], &regs);
-                              let cond = if op == "==" { v1 == v2 } else if op == "!=" { v1 != v2 } else if op == ">" { v1 > v2 } else if op == "<" { v1 < v2 } else { false };
-                              if cond { cur = &cur[4..]; continue; } else { break; }
-                          } else if cmd == "set" && cur.len() > 2 {
-                              let var = cur[1].as_bytes()[0];
-                              if var >= b'a' && var <= b'z' { regs[(var - b'a') as usize] = get_val(cur[2], &regs); } break;
-                          } else if cmd == "op" && cur.len() > 3 {
-                              let var = cur[1].as_bytes()[0];
-                              if var >= b'a' && var <= b'z' {
-                                  let idx = (var - b'a') as usize; let v2 = get_val(cur[3], &regs);
-                                  if cur[2] == "add" { regs[idx] += v2; } else if cur[2] == "sub" { regs[idx] -= v2; } else if cur[2] == "mul" { regs[idx] *= v2; }
-                              } break;
-                          } else if cmd == "arr_set" && cur.len() > 3 {
-                              let base = get_val(cur[1], &regs) as usize; let idx = get_val(cur[2], &regs) as usize; let val = get_val(cur[3], &regs);
-                              if base+idx < 1024 { mem[base+idx] = val; } break;
-                          } else if cmd == "arr_get" && cur.len() > 3 {
-                              let var = cur[1].as_bytes()[0];
-                              if var >= b'a' && var <= b'z' {
-                                  let base = get_val(cur[2], &regs) as usize; let idx = get_val(cur[3], &regs) as usize;
-                                  if base+idx < 1024 { regs[(var-b'a') as usize] = mem[base+idx]; }
-                              } break;
-                          } else if cmd == "key" && cur.len() > 1 {
-                              let var = cur[1].as_bytes()[0];
-                              if var >= b'a' && var <= b'z' { regs[(var - b'a') as usize] = key as i32; } break;
-                          } else if cmd == "rand" && cur.len() > 2 {
-                              let var = cur[1].as_bytes()[0];
-                              if var >= b'a' && var <= b'z' {
-                                  seed = (seed.wrapping_mul(1103515245).wrapping_add(12345)) % 2147483648;
-                                  regs[(var - b'a') as usize] = (seed % (get_val(cur[2], &regs) as u32)) as i32;
-                              } break;
-                          } else if cmd == "clear" && cur.len() > 1 {
-                              let c = get_val(cur[1], &regs) as usize; draw_rect(fb, w, 0, 0, w, h, colors[c % colors.len()]); break;
-                          } else if cmd == "grid" && cur.len() > 3 {
-                              let rx = get_val(cur[1], &regs) as u32 * 20; let ry = get_val(cur[2], &regs) as u32 * 20;
-                              let rc = get_val(cur[3], &regs) as usize; draw_rect(fb, w, rx, ry, 20, 20, colors[rc % colors.len()]); break;
-                          } else if cmd == "text" && cur.len() > 4 {
-                              let rx = get_val(cur[1], &regs) as u32; let ry = get_val(cur[2], &regs) as u32;
-                              let rc = get_val(cur[3], &regs) as usize; 
-                              let mut tmp = [0u8; 64]; let mut ti = 0;
-                              for b in cur[4].as_bytes() { if ti < 64 { tmp[ti] = if *b==b'_' { b' ' } else { *b }; ti+=1; } }
-                              if let Ok(s) = str::from_utf8(&tmp[..ti]) { draw_text(fb, w, rx, ry, s, colors[rc % colors.len()], 2); } break;
-                          } else if cmd == "delay" && cur.len() > 1 {
-                              let ms = get_val(cur[1], &regs); for _ in 0..(ms * 50000) { core::hint::spin_loop(); } break;
-                          } else if cmd == "jmp" && cur.len() > 1 {
-                              pc = get_val(cur[1], &regs) as usize; jumped = true; break;
-                          } else if cmd == "exit" {
-                              exit = true; break;
-                          } else { break; }
-                      }
-                      if exit || jumped { break; }
-                  }
-                  if exit { break; }
-                  if !jumped { pc += 1; }
-              }
-          }
-          
-          struct VFile { name: &'static str, content: &'static str }
-          
-          // ВСЕ ПРИЛОЖЕНИЯ НАПИСАНЫ НА НАШЕМ ВСТРОЕННОМ ЯЗЫКЕ!
-          const FILESYSTEM: [VFile; 3] = [
-              VFile { name: "sysinfo.ae", content: "clear 0\ntext 20 20 4 AETHERIA_OS_-_SYSTEM_MONITOR\ntext 20 80 1 Kernel_:_Bare-Metal_Rust_0.5\ntext 20 110 1 Arch_:_aarch64_(ARM64)\ntext 20 140 1 Mem_:_Direct_Framebuffer\ntext 20 170 1 VM_:_AetherScript_Active\ntext 20 280 3 Press_Q_to_exit...\nkey k\nif k == 113 exit 0\ndelay 50\njmp 8" },
-              VFile { name: "snake.ae", content: "set l 3; arr_set 0 0 15; arr_set 256 0 10; arr_set 0 1 14; arr_set 256 1 10; arr_set 0 2 13; arr_set 256 2 10\nset d 1; set a 30; set b 15; set q 0\nclear 0; text 20 10 4 AETHERIA_SNAKE_[W,A,S,D]\nkey k\nif k == 119 if d != 2 set d 0\nif k == 100 if d != 3 set d 1\nif k == 115 if d != 0 set d 2\nif k == 97 if d != 1 set d 3\nif k == 113 exit 0\nset i l; op i sub 1\nif i == 0 jmp 13\nset j i; op j sub 1; arr_get x 0 j; arr_set 0 i x; arr_get y 256 j; arr_set 256 i y\nop i sub 1; jmp 10\narr_get x 0 0; arr_get y 256 0\nif d == 0 op y sub 1\nif d == 1 op x add 1\nif d == 2 op y add 1\nif d == 3 op x sub 1\nif x < 0 set q 1\nif x > 63 set q 1\nif y < 2 set q 1\nif y > 35 set q 1\nif q == 1 text 400 300 3 GAME_OVER; delay 2000; exit 0\narr_set 0 0 x; arr_set 256 0 y\nif x != a jmp 26\nif y != b jmp 26; op l add 1; rand a 60; op a add 2; rand b 30; op b add 3\ngrid a b 3; set i 0\nif i == l jmp 30\narr_get x 0 i; arr_get y 256 i; grid x y 2\nop i add 1; jmp 27\ndelay 60; jmp 2" },
-              VFile { name: "bounce.ae", content: "set x 10\nset y 10\nset a 1\nset b 1\nclear 0\ngrid x y 4\nop x add a\nop y add b\nif x > 60 set a -1\nif x < 1 set a 1\nif y > 30 set b -1\nif y < 1 set b 1\nkey k\nif k == 113 exit 0\ndelay 30\njmp 4" }
-          ];
-          
-          #[no_mangle]
-          #[link_section = ".text.entry"]
-          pub extern "C" fn aetheria_main(fb_addr: *mut u32, kb_addr: *mut u8, width: u32, height: u32) -> ! {
-              let bg = 0xFF0D0D14u32; 
-              let green = 0xFF4AF626u32; 
-              let white = 0xFFFFFFFFu32; 
-              let red = 0xFFF38BA8u32;
-              let scale = 2u32; 
-              let font_w = 8 * scale; 
-              let font_h = 8 * scale;
-              let prompt = "root@aetheria:~# ";
-              
-              let mut input_buf = [0u8; 64]; 
-              let mut input_len = 0usize;
-              let mut cursor_y = 40u32;
-              let mut tick = 0u32;
-              let mut cursor_visible = false;
-              
-              // Начальная отрисовка
-              draw_rect(fb_addr, width, 0, 0, width, height, bg);
-              draw_text(fb_addr, width, 20, 20, "AetheriaOS v0.5 - Type 'help' for commands", green, scale);
-              
-              loop {
-                  // Обработка клавиатуры
-                  let key = unsafe { read_volatile(kb_addr) };
-                  
-                  if key != 0 {
-                      unsafe { write_volatile(kb_addr, 0); }
-                      
-                      if key == 10 { // ENTER
-                          // Скрываем курсор перед обработкой
-                          draw_rect(fb_addr, width, 0, cursor_y, width, font_h, bg);
-                          
-                          // Обрабатываем команду только если что-то введено
-                          if input_len > 0 {
-                              if let Ok(cmd_str) = str::from_utf8(&input_buf[..input_len]) {
-                                  let cmd = cmd_str.trim();
-                                  
-                                  // Показываем введённую команду
-                                  draw_text(fb_addr, width, 20, cursor_y, prompt, green, scale);
-                                  draw_text(fb_addr, width, 20 + (prompt.len() as u32) * font_w, cursor_y, cmd, white, scale);
-                                  cursor_y += font_h + 8;
-                                  
-                                  // Выполняем команду
-                                  if cmd == "help" {
-                                      draw_text(fb_addr, width, 20, cursor_y, "Commands: ls, run <file>, clear", white, scale);
-                                      cursor_y += font_h + 5;
-                                      draw_text(fb_addr, width, 20, cursor_y, "Files: sysinfo.ae, snake.ae, bounce.ae", white, scale);
-                                      cursor_y += font_h + 8;
-                                  } else if cmd == "ls" {
-                                      for file in FILESYSTEM.iter() {
-                                          draw_text(fb_addr, width, 20, cursor_y, file.name, white, scale);
-                                          cursor_y += font_h + 5;
-                                      }
-                                      cursor_y += 3;
-                                  } else if cmd.starts_with("run ") && cmd.len() > 4 {
-                                      let file_name = &cmd[4..];
-                                      let mut found = false;
-                                      
-                                      for file in FILESYSTEM.iter() {
-                                          if file.name == file_name {
-                                              found = true;
-                                              // Полная очистка для игры
-                                              draw_rect(fb_addr, width, 0, 0, width, height, bg);
-                                              
-                                              // Запускаем скрипт
-                                              run_script(fb_addr, kb_addr, width, height, file.content);
-                                              
-                                              // Восстановление после выхода
-                                              draw_rect(fb_addr, width, 0, 0, width, height, bg);
-                                              draw_text(fb_addr, width, 20, 20, "AetheriaOS v0.5 - Type 'help' for commands", green, scale);
-                                              cursor_y = 40;
-                                              break;
-                                          }
-                                      }
-                                      
-                                      if !found {
-                                          draw_text(fb_addr, width, 20, cursor_y, "File not found", red, scale);
-                                          cursor_y += font_h + 8;
-                                      }
-                                  } else if cmd == "clear" {
-                                      draw_rect(fb_addr, width, 0, 0, width, height, bg);
-                                      draw_text(fb_addr, width, 20, 20, "AetheriaOS v0.5 - Type 'help' for commands", green, scale);
-                                      cursor_y = 40;
-                                  } else {
-                                      draw_text(fb_addr, width, 20, cursor_y, "Unknown command. Type 'help'", red, scale);
-                                      cursor_y += font_h + 8;
-                                  }
-                              }
-                          }
-                          
-                          // Очищаем буфер ввода
-                          input_len = 0;
-                          
-                          // Проверка переполнения экрана
-                          if cursor_y > height - 60 {
-                              draw_rect(fb_addr, width, 0, 0, width, height, bg);
-                              draw_text(fb_addr, width, 20, 20, "AetheriaOS v0.5 - Type 'help' for commands", green, scale);
-                              cursor_y = 40;
-                          }
-                          
-                          tick = 0;
-                          cursor_visible = false;
-                          
-                      } else if key == 8 { // BACKSPACE
-                          if input_len > 0 {
-                              // Очищаем строку
-                              draw_rect(fb_addr, width, 0, cursor_y, width, font_h, bg);
-                              input_len -= 1;
-                              tick = 0;
-                              cursor_visible = false;
-                          }
-                      } else if key >= 32 && key <= 126 { // Печатные символы
-                          if input_len < 63 {
-                              input_buf[input_len] = key;
-                              input_len += 1;
-                              
-                              // Очищаем строку и перерисовываем
-                              draw_rect(fb_addr, width, 0, cursor_y, width, font_h, bg);
-                              tick = 0;
-                              cursor_visible = false;
-                          }
-                      }
-                  }
-                  
-                  // Отрисовка промпта и ввода каждый кадр
-                  if tick % 5000 == 0 {
-                      // Очищаем строку
-                      draw_rect(fb_addr, width, 0, cursor_y, width, font_h, bg);
-                      
-                      // Рисуем промпт
-                      draw_text(fb_addr, width, 20, cursor_y, prompt, green, scale);
-                      
-                      // Рисуем введённый текст
-                      if input_len > 0 {
-                          if let Ok(s) = str::from_utf8(&input_buf[..input_len]) {
-                              draw_text(fb_addr, width, 20 + (prompt.len() as u32) * font_w, cursor_y, s, white, scale);
-                          }
-                      }
-                      
-                      // Мигание курсора (медленнее)
-                      if tick % 40000 == 0 {
-                          cursor_visible = !cursor_visible;
-                      }
-                      
-                      // Рисуем курсор
-                      if cursor_visible {
-                          let cursor_x = 20 + (prompt.len() as u32 + input_len as u32) * font_w;
-                          draw_rect(fb_addr, width, cursor_x, cursor_y + font_h - 3, font_w / 2, 3, green);
-                      }
-                  }
-                  
-                  tick += 1;
-              }
-          }
-          EOF
-          
-          cat > aetheria_kernel/linker.ld << 'EOF'
-          ENTRY(aetheria_main);
-          SECTIONS { . = 0x00000000; .text : { *(.text.entry) *(.text*) } .rodata : { *(.rodata*) } .data : { *(.data*) } .bss : { *(.bss*) *(COMMON) } /DISCARD/ : { *(.eh_frame) *(.comment) } }
-          EOF
-          
-          cat > aetheria_kernel/Cargo.toml << 'EOF'
-          [package]
-          name = "aetheria_kernel"
-          version = "0.1.0"
-          edition = "2021"
-          [lib]
-          crate-type = ["staticlib"]
-          [profile.release]
-          opt-level = 3
-          panic = "abort"
-          EOF
-          
-          cd aetheria_kernel
-          cargo build --release --target aarch64-unknown-none
-          LLD=$(find $ANDROID_HOME/ndk -name "ld.lld" | head -n 1)
-          OBJCOPY=$(find $ANDROID_HOME/ndk -name "llvm-objcopy" | head -n 1)
-          $LLD -T linker.ld -o kernel.elf target/aarch64-unknown-none/release/libaetheria_kernel.a
-          $OBJCOPY -O binary kernel.elf kernel.bin
-          cd ..
-      
-      # ===== 2. СОЗДАЁМ ИНТЕРФЕЙС АНДРОИДА СО ВСТРОЕННЫМ D-PAD =====
-      - name: Create Android Wrapper
+      - name: Create Ultimate Secure Vault
         run: |
-          mkdir -p app/src/main/{java/com/aetheria/loader,cpp,res/layout,res/raw}
-          cp aetheria_kernel/kernel.bin app/src/main/res/raw/kernel_bin
-          
-          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
-          <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent" android:layout_height="match_parent" android:background="#000">
-              <SurfaceView android:id="@+id/surface" android:layout_width="match_parent" android:layout_height="match_parent" />
-              <Button android:id="@+id/btnQ" android:layout_width="80dp" android:layout_height="50dp" android:text="QUIT"
-                  android:layout_alignParentTop="true" android:layout_alignParentRight="true" android:layout_margin="20dp" 
-                  android:background="#88FF0000" android:textColor="#FFF" android:textStyle="bold"/>
-              <RelativeLayout android:layout_width="200dp" android:layout_height="200dp" 
-                  android:layout_alignParentBottom="true" android:layout_alignParentRight="true" android:layout_margin="20dp">
-                  <Button android:id="@+id/btnW" android:layout_width="65dp" android:layout_height="65dp" android:text="UP" android:layout_centerHorizontal="true" android:background="#55FFFFFF" android:textColor="#FFF"/>
-                  <Button android:id="@+id/btnS" android:layout_width="65dp" android:layout_height="65dp" android:text="DOWN" android:layout_centerHorizontal="true" android:layout_alignParentBottom="true" android:background="#55FFFFFF" android:textColor="#FFF"/>
-                  <Button android:id="@+id/btnA" android:layout_width="65dp" android:layout_height="65dp" android:text="LEFT" android:layout_alignParentLeft="true" android:layout_centerVertical="true" android:background="#55FFFFFF" android:textColor="#FFF"/>
-                  <Button android:id="@+id/btnD" android:layout_width="65dp" android:layout_height="65dp" android:text="RIGHT" android:layout_alignParentRight="true" android:layout_centerVertical="true" android:background="#55FFFFFF" android:textColor="#FFF"/>
-              </RelativeLayout>
-          </RelativeLayout>
+          mkdir -p app/src/main/java/com/wordgame/{game,vault,security,utils}
+          mkdir -p app/src/main/res/{layout,values,drawable,raw,xml}
+
+          cat > settings.gradle << 'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          include ':app'
           EOF
-          
-          cat > app/src/main/java/com/aetheria/loader/MainActivity.java << 'EOF'
-          package com.aetheria.loader;
-          import android.app.Activity;
-          import android.content.Context;
-          import android.os.Bundle;
-          import android.graphics.*;
-          import android.view.*;
-          import android.view.inputmethod.InputMethodManager;
-          import java.nio.ByteBuffer;
-          
-          public class MainActivity extends Activity {
-              static { System.loadLibrary("aetheria_loader"); }
-              private native void startKernel(byte[] kernelData, ByteBuffer frameBuffer, ByteBuffer kbBuffer, int width, int height);
-              private SurfaceView surface;
-              private ByteBuffer frameBuffer, kbBuffer; 
-              private Bitmap bitmap;
-              
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-                  setContentView(R.layout.activity_main);
-                  surface = findViewById(R.id.surface);
-                  
-                  frameBuffer = ByteBuffer.allocateDirect(1280 * 720 * 4);
-                  kbBuffer = ByteBuffer.allocateDirect(1);
-                  bitmap = Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888);
-                  
-                  surface.setFocusable(true);
-                  surface.setFocusableInTouchMode(true);
-                  surface.setOnTouchListener((v, e) -> {
-                      surface.requestFocus();
-                      InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-                      imm.showSoftInput(surface, InputMethodManager.SHOW_IMPLICIT);
-                      return true;
-                  });
-                  
-                  View.OnTouchListener dpad = (v, e) -> {
-                      if (e.getAction() == MotionEvent.ACTION_DOWN) {
-                          if(v.getId() == R.id.btnW) kbBuffer.put(0, (byte)'w');
-                          if(v.getId() == R.id.btnS) kbBuffer.put(0, (byte)'s');
-                          if(v.getId() == R.id.btnA) kbBuffer.put(0, (byte)'a');
-                          if(v.getId() == R.id.btnD) kbBuffer.put(0, (byte)'d');
-                          if(v.getId() == R.id.btnQ) kbBuffer.put(0, (byte)'q');
-                      }
-                      return false;
-                  };
-                  findViewById(R.id.btnW).setOnTouchListener(dpad);
-                  findViewById(R.id.btnS).setOnTouchListener(dpad);
-                  findViewById(R.id.btnA).setOnTouchListener(dpad);
-                  findViewById(R.id.btnD).setOnTouchListener(dpad);
-                  findViewById(R.id.btnQ).setOnTouchListener(dpad);
-                  
-                  surface.setOnKeyListener((v, keyCode, event) -> {
-                      if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                          int c = event.getUnicodeChar();
-                          if (keyCode == KeyEvent.KEYCODE_DEL) c = 8;
-                          if (keyCode == KeyEvent.KEYCODE_ENTER) c = 10;
-                          if (c != 0) kbBuffer.put(0, (byte)c);
-                          return true;
-                      }
-                      return false;
-                  });
-                  
-                  surface.getHolder().addCallback(new SurfaceHolder.Callback() {
-                      @Override
-                      public void surfaceCreated(SurfaceHolder h) {
-                          new Thread(() -> {
-                              try {
-                                  byte[] kernel = getResources().openRawResource(R.raw.kernel_bin).readAllBytes();
-                                  startKernel(kernel, frameBuffer, kbBuffer, 1280, 720);
-                              } catch(Exception e) {}
-                          }).start();
-                          
-                          new Thread(() -> {
-                              while(true) {
-                                  Canvas c = h.lockCanvas();
-                                  if (c != null) {
-                                      frameBuffer.position(0);
-                                      bitmap.copyPixelsFromBuffer(frameBuffer);
-                                      c.drawBitmap(bitmap, null, new Rect(0,0, surface.getWidth(), surface.getHeight()), null);
-                                      h.unlockCanvasAndPost(c);
-                                  }
-                                  try { Thread.sleep(16); } catch(Exception e){}
-                              }
-                          }).start();
-                      }
-                      @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h2) {}
-                      @Override public void surfaceDestroyed(SurfaceHolder h) {}
-                  });
+
+          cat > gradle.properties << 'EOF'
+          android.useAndroidX=true
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          org.gradle.jvmargs=-Xmx3072m
+          android.enableR8.fullMode=true
+          EOF
+
+          cat > build.gradle << 'EOF'
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies { classpath 'com.android.tools.build:gradle:8.2.2' }
+          }
+          EOF
+
+          cat > app/build.gradle << 'EOF'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'com.wordgame'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.wordgame'
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
               }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled true
+                      shrinkResources true
+                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+                  }
+                  debug {
+                      minifyEnabled true
+                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+                  }
+              }
+              buildFeatures { viewBinding true }
+          }
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+              implementation 'com.google.android.material:material:1.11.0'
+              implementation 'androidx.recyclerview:recyclerview:1.3.2'
+              implementation 'androidx.security:security-crypto:1.1.0-alpha06'
           }
           EOF
+
+          # МАКСИМАЛЬНАЯ ОБФУСКАЦИЯ
+          cat > app/proguard-rules.pro << 'EOF'
+          -ignorewarnings
+          -keep class androidx.** { *; }
+          -keep class com.google.android.material.** { *; }
+          -dontwarn androidx.**
+          -dontwarn com.google.android.material.**
           
-          cat > app/src/main/cpp/loader.cpp << 'EOF'
-          #include <jni.h>
-          #include <sys/mman.h>
-          #include <cstring>
-          extern "C" JNIEXPORT void JNICALL
-          Java_com_aetheria_loader_MainActivity_startKernel(JNIEnv* env, jobject, jbyteArray kernelData, jobject fb, jobject kb, jint w, jint h) {
-              jsize len = env->GetArrayLength(kernelData);
-              jbyte* bytes = env->GetByteArrayElements(kernelData, nullptr);
-              void* fb_ptr = env->GetDirectBufferAddress(fb);
-              void* kb_ptr = env->GetDirectBufferAddress(kb);
-              void* exec_mem = mmap(nullptr, len, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-              memcpy(exec_mem, bytes, len);
-              __builtin___clear_cache((char*)exec_mem, (char*)exec_mem + len);
-              typedef void (*KernelMain)(void*, void*, uint32_t, uint32_t);
-              KernelMain kmain = (KernelMain)exec_mem;
-              kmain(fb_ptr, kb_ptr, w, h);
+          # Обфускация всех классов хранилища
+          -repackageclasses 'o'
+          -allowaccessmodification
+          -overloadaggressively
+          -optimizationpasses 5
+          
+          # Шифрование строк
+          -adaptclassstrings
+          -adaptresourcefilenames
+          -adaptresourcefilecontents
+          
+          # Удаление отладочной информации
+          -assumenosideeffects class android.util.Log {
+              public static *** d(...);
+              public static *** v(...);
+              public static *** i(...);
           }
           EOF
-          
-          cat > app/src/main/cpp/CMakeLists.txt << 'EOF'
-          cmake_minimum_required(VERSION 3.22)
-          project(aetheria_loader)
-          add_library(aetheria_loader SHARED loader.cpp)
-          target_link_libraries(aetheria_loader log)
-          target_compile_options(aetheria_loader PRIVATE -O3 -fPIC)
-          EOF
-          
+
           cat > app/src/main/AndroidManifest.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <application android:label="AetheriaOS" android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
-                  <activity android:name="com.aetheria.loader.MainActivity" android:exported="true" android:screenOrientation="landscape">
-                      <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+              <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+              <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+              <application 
+                  android:icon="@drawable/ic_launcher" 
+                  android:label="Word Puzzle" 
+                  android:theme="@style/GameTheme"
+                  android:allowBackup="false"
+                  android:fullBackupContent="false"
+                  android:dataExtractionRules="@xml/data_extraction_rules"
+                  tools:targetApi="31">
+                  
+                  <activity android:name=".game.GameActivity" 
+                      android:exported="true"
+                      android:excludeFromRecents="false">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
                   </activity>
+                  
+                  <activity android:name=".game.SettingsActivity" android:theme="@style/GameTheme"/>
+                  <activity android:name=".vault.VaultActivity" 
+                      android:theme="@style/VaultTheme" 
+                      android:excludeFromRecents="true"
+                      android:taskAffinity=""/>
+                  <activity android:name=".vault.MediaViewerActivity" 
+                      android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+                      android:excludeFromRecents="true"/>
+                  
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data android:name="android.support.FILE_PROVIDER_PATHS" 
+                          android:resource="@xml/file_paths"/>
+                  </provider>
               </application>
           </manifest>
           EOF
-          
-          cat > app/build.gradle << 'EOF'
-          plugins {
-              id 'com.android.application'
-          }
 
-          android {
-              namespace 'com.aetheria.loader'
-              compileSdk 34
+          cat > app/src/main/res/xml/data_extraction_rules.xml << 'EOF'
+          <data-extraction-rules>
+              <cloud-backup>
+                  <exclude domain="sharedpref" path="."/>
+                  <exclude domain="database" path="."/>
+                  <exclude domain="file" path="."/>
+              </cloud-backup>
+          </data-extraction-rules>
+          EOF
+
+          cat > app/src/main/res/values/themes.xml << 'EOF'
+          <resources>
+              <style name="GameTheme" parent="Theme.MaterialComponents.Light.NoActionBar">
+                  <item name="colorPrimary">#FF9800</item>
+                  <item name="colorPrimaryDark">#F57C00</item>
+                  <item name="colorAccent">#4CAF50</item>
+              </style>
+              <style name="VaultTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+                  <item name="colorPrimary">#1976D2</item>
+                  <item name="colorPrimaryDark">#0D47A1</item>
+                  <item name="colorAccent">#00BCD4</item>
+                  <item name="android:windowBackground">#000000</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/xml/file_paths.xml << 'EOF'
+          <paths>
+              <files-path name="vault" path="vault/"/>
+          </paths>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher.xml << 'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+              <path android:fillColor="#FF9800" android:pathData="M8,8h32v32h-32z"/>
+              <path android:fillColor="#FFF" android:pathData="M14,18h6v3h-6z M22,18h6v3h-6z M30,18h4v3h-4z M14,27h20v3h-20z"/>
+          </vector>
+          EOF
+
+          # LAYOUTS
+          cat > app/src/main/res/layout/activity_game.xml << 'EOF'
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent" 
+              android:orientation="vertical" android:background="#FFF5E6">
+              <LinearLayout android:layout_width="match_parent" android:layout_height="60dp" 
+                  android:background="#FF9800" android:gravity="center" android:orientation="horizontal">
+                  <TextView android:layout_width="0dp" android:layout_height="wrap_content" 
+                      android:layout_weight="1" android:text="🎮 Word Puzzle" 
+                      android:textSize="24sp" android:textColor="#FFF" android:gravity="center"/>
+                  <Button android:id="@+id/btnSettings" android:layout_width="50dp" 
+                      android:layout_height="50dp" android:text="⚙️" 
+                      android:backgroundTint="#F57C00"/>
+              </LinearLayout>
+              <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:text="Угадай слово по подсказке:" android:textSize="18sp" 
+                  android:padding="16dp" android:gravity="center"/>
+              <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:text="Подсказка: Животное с длинной шеей" 
+                  android:textSize="16sp" android:padding="12dp" 
+                  android:background="#FFE0B2" android:layout_margin="16dp"/>
+              <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:layout_gravity="center" android:orientation="horizontal" android:layout_marginTop="24dp">
+                  <TextView android:layout_width="40dp" android:layout_height="40dp" 
+                      android:text="Ж" android:textSize="24sp" android:gravity="center" 
+                      android:background="#FFF" android:layout_margin="4dp"/>
+                  <TextView android:layout_width="40dp" android:layout_height="40dp" 
+                      android:text="И" android:textSize="24sp" android:gravity="center" 
+                      android:background="#FFF" android:layout_margin="4dp"/>
+                  <TextView android:layout_width="40dp" android:layout_height="40dp" 
+                      android:text="Р" android:textSize="24sp" android:gravity="center" 
+                      android:background="#FFF" android:layout_margin="4dp"/>
+                  <TextView android:layout_width="40dp" android:layout_height="40dp" 
+                      android:text="А" android:textSize="24sp" android:gravity="center" 
+                      android:background="#FFF" android:layout_margin="4dp"/>
+                  <TextView android:layout_width="40dp" android:layout_height="40dp" 
+                      android:text="Ф" android:textSize="24sp" android:gravity="center" 
+                      android:background="#FFF" android:layout_margin="4dp"/>
+              </LinearLayout>
+              <GridLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:layout_gravity="center" android:columnCount="4" android:layout_marginTop="24dp">
+                  <Button android:text="А" android:backgroundTint="#4CAF50" android:layout_margin="4dp"/>
+                  <Button android:text="Б" android:backgroundTint="#4CAF50" android:layout_margin="4dp"/>
+                  <Button android:text="В" android:backgroundTint="#4CAF50" android:layout_margin="4dp"/>
+                  <Button android:text="Г" android:backgroundTint="#4CAF50" android:layout_margin="4dp"/>
+              </GridLayout>
+              <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:text="Уровень: 1/100 | Монеты: 0" android:gravity="center" 
+                  android:padding="16dp" android:textSize="14sp" android:textColor="#666"/>
+          </LinearLayout>
+          EOF
+
+          cat > app/src/main/res/layout/activity_settings.xml << 'EOF'
+          <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent" 
+              android:background="#FFF5E6">
+              <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:orientation="vertical" android:padding="16dp">
+                  <TextView android:layout_width="match_parent" android:layout_height="60dp"
+                      android:text="⚙️ Настройки" android:textSize="24sp" 
+                      android:gravity="center" android:background="#FF9800" android:textColor="#FFF"/>
+                  <TextView android:text="🔊 Звук" android:textSize="18sp" android:layout_marginTop="16dp"/>
+                  <SeekBar android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="50"/>
+                  <TextView android:text="🎵 Музыка" android:textSize="18sp" android:layout_marginTop="16dp"/>
+                  <SeekBar android:layout_width="match_parent" android:layout_height="wrap_content" android:max="100" android:progress="50"/>
+                  <TextView android:text="🎨 Графика" android:textSize="18sp" android:layout_marginTop="16dp"/>
+                  <SeekBar android:id="@+id/graphicsBar" android:layout_width="match_parent" 
+                      android:layout_height="wrap_content" android:max="100" android:progress="0"/>
+                  <TextView android:id="@+id/graphicsLabel" android:text="Низкая" 
+                      android:textSize="14sp" android:textColor="#666" android:gravity="center"/>
+                  <Space android:layout_width="match_parent" android:layout_height="100dp"/>
+              </LinearLayout>
+          </ScrollView>
+          EOF
+
+          cat > app/src/main/res/layout/activity_vault.xml << 'EOF'
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent" 
+              android:orientation="vertical" android:background="#000000">
+              <LinearLayout android:id="@+id/authLayout" android:layout_width="match_parent" 
+                  android:layout_height="match_parent" android:orientation="vertical" 
+                  android:gravity="center" android:padding="24dp">
+                  <TextView android:text="🔐" android:textSize="72sp" android:textColor="#1976D2"/>
+                  <TextView android:text="Секретное хранилище" android:textSize="24sp" 
+                      android:textColor="#FFF" android:layout_marginTop="16dp"/>
+                  <EditText android:id="@+id/passwordInput" android:layout_width="match_parent" 
+                      android:layout_height="wrap_content" android:hint="Введите PIN-код" 
+                      android:inputType="numberPassword" android:textColor="#FFF" 
+                      android:textColorHint="#555" android:backgroundTint="#1976D2"
+                      android:layout_marginTop="32dp" android:maxLength="6"/>
+                  <Button android:id="@+id/btnUnlock" android:layout_width="match_parent" 
+                      android:layout_height="wrap_content" android:text="🔓 Разблокировать" 
+                      android:backgroundTint="#1976D2" android:layout_marginTop="16dp"/>
+                  <TextView android:id="@+id/errorText" android:layout_width="match_parent" 
+                      android:layout_height="wrap_content" android:textColor="#F44336" 
+                      android:gravity="center" android:layout_marginTop="16dp" android:visibility="gone"/>
+                  <TextView android:id="@+id/attemptsText" android:layout_width="match_parent" 
+                      android:layout_height="wrap_content" android:textColor="#777" 
+                      android:gravity="center" android:layout_marginTop="8dp" 
+                      android:text="Осталось попыток: 5" android:textSize="12sp"/>
+              </LinearLayout>
+              <LinearLayout android:id="@+id/vaultLayout" android:layout_width="match_parent" 
+                  android:layout_height="match_parent" android:orientation="vertical" 
+                  android:visibility="gone">
+                  <LinearLayout android:layout_width="match_parent" android:layout_height="60dp" 
+                      android:background="#1976D2" android:orientation="horizontal" android:padding="8dp">
+                      <TextView android:layout_width="0dp" android:layout_height="wrap_content" 
+                          android:layout_weight="1" android:text="📁 Защищенные файлы" 
+                          android:textSize="18sp" android:textColor="#FFF" android:gravity="center_vertical"/>
+                      <Button android:id="@+id/btnAdd" android:layout_width="wrap_content" 
+                          android:layout_height="wrap_content" android:text="➕" android:backgroundTint="#00BCD4"/>
+                      <Button android:id="@+id/btnLock" android:layout_width="wrap_content" 
+                          android:layout_height="wrap_content" android:text="🔒" android:backgroundTint="#F44336"/>
+                  </LinearLayout>
+                  <androidx.recyclerview.widget.RecyclerView android:id="@+id/recyclerMedia" 
+                      android:layout_width="match_parent" android:layout_height="0dp" 
+                      android:layout_weight="1" android:padding="4dp"/>
+                  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" 
+                      android:padding="12dp" android:background="#111">
+                      <TextView android:id="@+id/statsText" android:layout_width="match_parent" 
+                          android:layout_height="wrap_content" android:text="Файлов: 0 | Размер: 0 MB" 
+                          android:textColor="#777" android:textSize="12sp"/>
+                  </LinearLayout>
+              </LinearLayout>
+          </LinearLayout>
+          EOF
+
+          cat > app/src/main/res/layout/activity_media_viewer.xml << 'EOF'
+          <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent" 
+              android:background="#000">
+              <ImageView android:id="@+id/imageView" android:layout_width="match_parent" 
+                  android:layout_height="match_parent" android:scaleType="fitCenter"/>
+              <VideoView android:id="@+id/videoView" android:layout_width="match_parent" 
+                  android:layout_height="match_parent" android:visibility="gone"/>
+              <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" 
+                  android:orientation="horizontal" android:padding="12dp" 
+                  android:background="#CC000000" android:layout_alignParentBottom="true">
+                  <Button android:id="@+id/btnExport" android:layout_width="0dp" 
+                      android:layout_height="wrap_content" android:layout_weight="1" 
+                      android:text="📤 Экспорт" android:backgroundTint="#4CAF50"/>
+                  <Button android:id="@+id/btnDelete" android:layout_width="0dp" 
+                      android:layout_height="wrap_content" android:layout_weight="1" 
+                      android:text="🗑️ Удалить" android:backgroundTint="#F44336"/>
+                  <Button android:id="@+id/btnClose" android:layout_width="0dp" 
+                      android:layout_height="wrap_content" android:layout_weight="1" 
+                      android:text="❌ Закрыть" android:backgroundTint="#757575"/>
+              </LinearLayout>
+          </RelativeLayout>
+          EOF
+
+          cat > app/src/main/res/layout/item_media.xml << 'EOF'
+          <androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent" android:layout_height="wrap_content" 
+              android:layout_margin="4dp" app:cardBackgroundColor="#1A1A1A" 
+              app:cardCornerRadius="8dp" app:cardElevation="4dp">
+              <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" 
+                  android:orientation="vertical">
+                  <ImageView android:id="@+id/thumbnail" android:layout_width="match_parent" 
+                      android:layout_height="150dp" android:scaleType="centerCrop"/>
+                  <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" 
+                      android:orientation="vertical" android:padding="8dp">
+                      <TextView android:id="@+id/fileName" android:textColor="#FFF" 
+                          android:textSize="14sp" android:maxLines="1" android:ellipsize="end"/>
+                      <TextView android:id="@+id/fileInfo" android:textColor="#777" 
+                          android:textSize="11sp"/>
+                  </LinearLayout>
+              </LinearLayout>
+          </androidx.cardview.widget.CardView>
+          EOF
+
+          # ============= JAVA CLASSES =============
+          
+          # GameActivity
+          cat > app/src/main/java/com/wordgame/game/GameActivity.java << 'EOF'
+          package com.wordgame.game;
+          import android.app.Activity; import android.content.Intent; import android.os.Bundle;
+          import com.wordgame.R;
+          public class GameActivity extends Activity {
+              @Override protected void onCreate(Bundle s) {
+                  super.onCreate(s);
+                  setContentView(R.layout.activity_game);
+                  findViewById(R.id.btnSettings).setOnClickListener(v -> 
+                      startActivity(new Intent(this, SettingsActivity.class)));
+              }
+          }
+          EOF
+
+          # SettingsActivity
+          cat > app/src/main/java/com/wordgame/game/SettingsActivity.java << 'EOF'
+          package com.wordgame.game;
+          import android.app.Activity; import android.content.Intent; import android.os.Bundle;
+          import android.widget.*; import com.wordgame.R; import com.wordgame.vault.VaultActivity;
+          public class SettingsActivity extends Activity {
+              int secretTaps = 0;
+              @Override protected void onCreate(Bundle s) {
+                  super.onCreate(s);
+                  setContentView(R.layout.activity_settings);
+                  SeekBar graphicsBar = findViewById(R.id.graphicsBar);
+                  TextView graphicsLabel = findViewById(R.id.graphicsLabel);
+                  graphicsBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                      @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                          graphicsLabel.setText(progress < 33 ? "Низкая" : progress < 66 ? "Средняя" : "Высокая");
+                          if (progress == 100) {
+                              secretTaps++;
+                              if (secretTaps >= 3) {
+                                  startActivity(new Intent(SettingsActivity.this, VaultActivity.class));
+                                  finish();
+                              }
+                          } else secretTaps = 0;
+                      }
+                      @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+                      @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+                  });
+              }
+          }
+          EOF
+
+          # VaultActivity
+          cat > app/src/main/java/com/wordgame/vault/VaultActivity.java << 'EOF'
+          package com.wordgame.vault;
+          import android.Manifest; import android.app.Activity; import android.content.*;
+          import android.content.pm.PackageManager; import android.net.Uri; import android.os.Bundle;
+          import android.provider.MediaStore; import android.widget.*;
+          import androidx.core.app.ActivityCompat; import androidx.recyclerview.widget.*;
+          import com.wordgame.R; import com.wordgame.security.*;
+          import java.util.*;
+          public class VaultActivity extends Activity {
+              VaultManager vaultManager;
+              LinearLayout authLayout, vaultLayout;
+              EditText passwordInput;
+              TextView errorText, attemptsText, statsText;
+              RecyclerView recyclerMedia;
+              MediaAdapter adapter;
+              int attempts = 5;
+              static final int PICK_MEDIA = 100;
               
-              defaultConfig {
-                  applicationId 'com.aetheria.loader'
-                  minSdk 24
-                  targetSdk 34
+              @Override protected void onCreate(Bundle s) {
+                  super.onCreate(s);
+                  setContentView(R.layout.activity_vault);
+                  vaultManager = new VaultManager(this);
+                  authLayout = findViewById(R.id.authLayout);
+                  vaultLayout = findViewById(R.id.vaultLayout);
+                  passwordInput = findViewById(R.id.passwordInput);
+                  errorText = findViewById(R.id.errorText);
+                  attemptsText = findViewById(R.id.attemptsText);
+                  statsText = findViewById(R.id.statsText);
+                  recyclerMedia = findViewById(R.id.recyclerMedia);
                   
-                  externalNativeBuild {
-                      cmake {
-                          cppFlags "-O3 -fPIC"
+                  findViewById(R.id.btnUnlock).setOnClickListener(v -> unlock());
+                  findViewById(R.id.btnAdd).setOnClickListener(v -> {
+                      if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                          ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, 1);
+                      } else importMedia();
+                  });
+                  findViewById(R.id.btnLock).setOnClickListener(v -> lock());
+                  
+                  recyclerMedia.setLayoutManager(new GridLayoutManager(this, 2));
+              }
+              
+              void unlock() {
+                  String pass = passwordInput.getText().toString();
+                  if (vaultManager.authenticate(pass)) {
+                      authLayout.setVisibility(LinearLayout.GONE);
+                      vaultLayout.setVisibility(LinearLayout.VISIBLE);
+                      attempts = 5;
+                      loadMedia();
+                  } else {
+                      attempts--;
+                      if (attempts <= 0) {
+                          vaultManager.selfDestruct();
+                          Toast.makeText(this, "Превышено количество попыток. Самоуничтожение...", Toast.LENGTH_LONG).show();
+                          finishAffinity();
+                          System.exit(0);
+                      }
+                      errorText.setText("❌ Неверный PIN! Осталось попыток: " + attempts);
+                      errorText.setVisibility(TextView.VISIBLE);
+                      attemptsText.setText("Осталось попыток: " + attempts);
+                      passwordInput.setText("");
+                  }
+              }
+              
+              void lock() {
+                  authLayout.setVisibility(LinearLayout.VISIBLE);
+                  vaultLayout.setVisibility(LinearLayout.GONE);
+                  passwordInput.setText("");
+                  errorText.setVisibility(TextView.GONE);
+              }
+              
+              void importMedia() {
+                  Intent intent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                  intent.setType("image/* video/*");
+                  intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                  startActivityForResult(intent, PICK_MEDIA);
+              }
+              
+              @Override protected void onActivityResult(int req, int res, Intent data) {
+                  super.onActivityResult(req, res, data);
+                  if (req == PICK_MEDIA && res == RESULT_OK && data != null) {
+                      if (data.getClipData() != null) {
+                          for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                              vaultManager.importFile(data.getClipData().getItemAt(i).getUri());
+                          }
+                      } else if (data.getData() != null) {
+                          vaultManager.importFile(data.getData());
+                      }
+                      loadMedia();
+                  }
+              }
+              
+              void loadMedia() {
+                  List<VaultFile> files = vaultManager.getFiles();
+                  adapter = new MediaAdapter(files, file -> {
+                      Intent intent = new Intent(this, MediaViewerActivity.class);
+                      intent.putExtra("file", file.encryptedPath);
+                      intent.putExtra("type", file.type);
+                      startActivity(intent);
+                  });
+                  recyclerMedia.setAdapter(adapter);
+                  long totalSize = 0;
+                  for (VaultFile f : files) totalSize += f.size;
+                  statsText.setText("Файлов: " + files.size() + " | Размер: " + (totalSize / 1024 / 1024) + " MB");
+              }
+              
+              @Override public void onBackPressed() {
+                  if (vaultLayout.getVisibility() == LinearLayout.VISIBLE) lock();
+                  else super.onBackPressed();
+              }
+          }
+          EOF
+
+          # MediaViewerActivity
+          cat > app/src/main/java/com/wordgame/vault/MediaViewerActivity.java << 'EOF'
+          package com.wordgame.vault;
+          import android.app.Activity; import android.content.Intent; import android.graphics.BitmapFactory;
+          import android.net.Uri; import android.os.Bundle; import android.widget.*;
+          import androidx.core.content.FileProvider;
+          import com.wordgame.R; import com.wordgame.security.VaultManager;
+          import java.io.File;
+          public class MediaViewerActivity extends Activity {
+              VaultManager vaultManager;
+              ImageView imageView;
+              VideoView videoView;
+              String currentFile;
+              String fileType;
+              
+              @Override protected void onCreate(Bundle s) {
+                  super.onCreate(s);
+                  setContentView(R.layout.activity_media_viewer);
+                  vaultManager = new VaultManager(this);
+                  imageView = findViewById(R.id.imageView);
+                  videoView = findViewById(R.id.videoView);
+                  
+                  currentFile = getIntent().getStringExtra("file");
+                  fileType = getIntent().getStringExtra("type");
+                  
+                  File decrypted = vaultManager.decryptFile(currentFile);
+                  if (fileType.equals("image")) {
+                      imageView.setImageBitmap(BitmapFactory.decodeFile(decrypted.getAbsolutePath()));
+                      imageView.setVisibility(ImageView.VISIBLE);
+                  } else {
+                      videoView.setVideoPath(decrypted.getAbsolutePath());
+                      videoView.start();
+                      videoView.setVisibility(VideoView.VISIBLE);
+                  }
+                  
+                  findViewById(R.id.btnExport).setOnClickListener(v -> {
+                      File exported = vaultManager.exportFile(currentFile);
+                      Intent intent = new Intent(Intent.ACTION_VIEW);
+                      Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", exported);
+                      intent.setDataAndType(uri, fileType.equals("image") ? "image/*" : "video/*");
+                      intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                      startActivity(Intent.createChooser(intent, "Экспорт"));
+                      Toast.makeText(this, "✅ Файл экспортирован", Toast.LENGTH_SHORT).show();
+                  });
+                  
+                  findViewById(R.id.btnDelete).setOnClickListener(v -> {
+                      vaultManager.deleteFile(currentFile);
+                      Toast.makeText(this, "🗑️ Файл удален", Toast.LENGTH_SHORT).show();
+                      finish();
+                  });
+                  
+                  findViewById(R.id.btnClose).setOnClickListener(v -> finish());
+              }
+              
+              @Override protected void onDestroy() {
+                  super.onDestroy();
+                  vaultManager.cleanupTemp();
+              }
+          }
+          EOF
+
+          # MediaAdapter
+          cat > app/src/main/java/com/wordgame/vault/MediaAdapter.java << 'EOF'
+          package com.wordgame.vault;
+          import android.graphics.BitmapFactory; import android.view.*;
+          import android.widget.*; import androidx.recyclerview.widget.RecyclerView;
+          import com.wordgame.R; import com.wordgame.security.VaultManager;
+          import java.io.File; import java.util.List;
+          public class MediaAdapter extends RecyclerView.Adapter<MediaAdapter.VH> {
+              List<VaultFile> files;
+              OnItemClick listener;
+              public interface OnItemClick { void onClick(VaultFile file); }
+              public MediaAdapter(List<VaultFile> f, OnItemClick l) { files = f; listener = l; }
+              
+              @Override public VH onCreateViewHolder(ViewGroup p, int t) {
+                  return new VH(LayoutInflater.from(p.getContext()).inflate(R.layout.item_media, p, false));
+              }
+              
+              @Override public void onBindViewHolder(VH h, int p) {
+                  VaultFile f = files.get(p);
+                  h.fileName.setText(f.originalName);
+                  h.fileInfo.setText(f.type.equals("image") ? "📷 " : "🎬 " + (f.size / 1024) + " KB");
+                  
+                  VaultManager vm = new VaultManager(h.itemView.getContext());
+                  File thumb = vm.decryptFile(f.encryptedPath);
+                  if (f.type.equals("image")) {
+                      h.thumbnail.setImageBitmap(BitmapFactory.decodeFile(thumb.getAbsolutePath()));
+                  }
+                  vm.cleanupTemp();
+                  
+                  h.itemView.setOnClickListener(v -> listener.onClick(f));
+              }
+              
+              @Override public int getItemCount() { return files.size(); }
+              
+              static class VH extends RecyclerView.ViewHolder {
+                  ImageView thumbnail;
+                  TextView fileName, fileInfo;
+                  VH(View v) {
+                      super(v);
+                      thumbnail = v.findViewById(R.id.thumbnail);
+                      fileName = v.findViewById(R.id.fileName);
+                      fileInfo = v.findViewById(R.id.fileInfo);
+                  }
+              }
+          }
+          EOF
+
+          # VaultFile
+          cat > app/src/main/java/com/wordgame/vault/VaultFile.java << 'EOF'
+          package com.wordgame.vault;
+          public class VaultFile {
+              public String originalName;
+              public String encryptedPath;
+              public String type;
+              public long size;
+              public long timestamp;
+              
+              public VaultFile(String name, String path, String t, long s) {
+                  originalName = name;
+                  encryptedPath = path;
+                  type = t;
+                  size = s;
+                  timestamp = System.currentTimeMillis();
+              }
+          }
+          EOF
+
+          # ============= SECURITY CORE (ШИФРОВАНИЕ) =============
+          cat > app/src/main/java/com/wordgame/security/VaultManager.java << 'EOF'
+          package com.wordgame.security;
+          import android.content.*; import android.net.Uri;
+          import androidx.security.crypto.*;; import com.wordgame.vault.VaultFile;
+          import java.io.*; import java.security.*; import java.util.*;
+          import javax.crypto.*; import javax.crypto.spec.*;
+          public class VaultManager {
+              Context ctx;
+              File vaultDir, tempDir;
+              SharedPreferences prefs;
+              SecretKey key;
+              
+              public VaultManager(Context c) {
+                  ctx = c;
+                  vaultDir = new File(ctx.getFilesDir(), "vault");
+                  tempDir = new File(ctx.getCacheDir(), "temp");
+                  vaultDir.mkdirs();
+                  tempDir.mkdirs();
+                  
+                  try {
+                      prefs = EncryptedSharedPreferences.create(
+                          ctx, "vault_prefs", getMasterKey(),
+                          EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                          EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                      );
+                      
+                      if (!prefs.contains("pin")) {
+                          prefs.edit().putString("pin", hashPin("123456")).apply();
+                      }
+                      
+                      key = generateKey();
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                  }
+              }
+              
+              MasterKey getMasterKey() throws Exception {
+                  return new MasterKey.Builder(ctx)
+                      .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                      .build();
+              }
+              
+              SecretKey generateKey() throws Exception {
+                  KeyGenerator kg = KeyGenerator.getInstance("AES");
+                  kg.init(256);
+                  return kg.generateKey();
+              }
+              
+              public boolean authenticate(String pin) {
+                  String stored = prefs.getString("pin", "");
+                  return stored.equals(hashPin(pin));
+              }
+              
+              String hashPin(String pin) {
+                  try {
+                      MessageDigest md = MessageDigest.getInstance("SHA-256");
+                      byte[] hash = md.digest(pin.getBytes());
+                      StringBuilder sb = new StringBuilder();
+                      for (byte b : hash) sb.append(String.format("%02x", b));
+                      return sb.toString();
+                  } catch (Exception e) {
+                      return "";
+                  }
+              }
+              
+              public void importFile(Uri uri) {
+                  try {
+                      InputStream is = ctx.getContentResolver().openInputStream(uri);
+                      String fileName = UUID.randomUUID().toString();
+                      File encrypted = new File(vaultDir, fileName);
+                      
+                      Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+                      cipher.init(Cipher.ENCRYPT_MODE, key);
+                      byte[] iv = cipher.getIV();
+                      
+                      FileOutputStream fos = new FileOutputStream(encrypted);
+                      fos.write(iv);
+                      
+                      CipherOutputStream cos = new CipherOutputStream(fos, cipher);
+                      byte[] buffer = new byte[8192];
+                      int len;
+                      while ((len = is.read(buffer)) > 0) cos.write(buffer, 0, len);
+                      
+                      cos.close();
+                      fos.close();
+                      is.close();
+                      
+                      String type = ctx.getContentResolver().getType(uri);
+                      String originalName = uri.getLastPathSegment();
+                      
+                      prefs.edit()
+                          .putString(fileName + "_name", originalName)
+                          .putString(fileName + "_type", type.contains("image") ? "image" : "video")
+                          .putLong(fileName + "_size", encrypted.length())
+                          .apply();
+                      
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                  }
+              }
+              
+              public File decryptFile(String encryptedPath) {
+                  try {
+                      File encrypted = new File(vaultDir, encryptedPath);
+                      File decrypted = new File(tempDir, "temp_" + System.currentTimeMillis());
+                      
+                      FileInputStream fis = new FileInputStream(encrypted);
+                      byte[] iv = new byte[16];
+                      fis.read(iv);
+                      
+                      Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+                      cipher.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(iv));
+                      
+                      CipherInputStream cis = new CipherInputStream(fis, cipher);
+                      FileOutputStream fos = new FileOutputStream(decrypted);
+                      
+                      byte[] buffer = new byte[8192];
+                      int len;
+                      while ((len = cis.read(buffer)) > 0) fos.write(buffer, 0, len);
+                      
+                      fos.close();
+                      cis.close();
+                      fis.close();
+                      
+                      return decrypted;
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                      return null;
+                  }
+              }
+              
+              public List<VaultFile> getFiles() {
+                  List<VaultFile> files = new ArrayList<>();
+                  File[] encrypted = vaultDir.listFiles();
+                  if (encrypted != null) {
+                      for (File f : encrypted) {
+                          String name = prefs.getString(f.getName() + "_name", "Unknown");
+                          String type = prefs.getString(f.getName() + "_type", "image");
+                          long size = prefs.getLong(f.getName() + "_size", 0);
+                          files.add(new VaultFile(name, f.getName(), type, size));
                       }
                   }
+                  return files;
               }
               
-              externalNativeBuild {
-                  cmake {
-                      path "src/main/cpp/CMakeLists.txt"
+              public File exportFile(String encryptedPath) {
+                  File decrypted = decryptFile(encryptedPath);
+                  String name = prefs.getString(encryptedPath + "_name", "export");
+                  File exported = new File(ctx.getExternalFilesDir(null), name);
+                  try {
+                      copyFile(decrypted, exported);
+                  } catch (Exception e) {
+                      e.printStackTrace();
+                  }
+                  return exported;
+              }
+              
+              public void deleteFile(String encryptedPath) {
+                  new File(vaultDir, encryptedPath).delete();
+                  prefs.edit()
+                      .remove(encryptedPath + "_name")
+                      .remove(encryptedPath + "_type")
+                      .remove(encryptedPath + "_size")
+                      .apply();
+              }
+              
+              public void cleanupTemp() {
+                  File[] temps = tempDir.listFiles();
+                  if (temps != null) {
+                      for (File f : temps) f.delete();
                   }
               }
+              
+              public void selfDestruct() {
+                  File[] files = vaultDir.listFiles();
+                  if (files != null) {
+                      for (File f : files) f.delete();
+                  }
+                  prefs.edit().clear().apply();
+              }
+              
+              void copyFile(File src, File dst) throws IOException {
+                  FileInputStream fis = new FileInputStream(src);
+                  FileOutputStream fos = new FileOutputStream(dst);
+                  byte[] buffer = new byte[8192];
+                  int len;
+                  while ((len = fis.read(buffer)) > 0) fos.write(buffer, 0, len);
+                  fis.close();
+                  fos.close();
+              }
           }
           EOF
-          
-          cat > build.gradle << 'EOF'
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.2.2'
-              }
-          }
 
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          EOF
-          
-          cat > gradle.properties << 'EOF'
-          android.useAndroidX=true
-          org.gradle.jvmargs=-Xmx2048m
-          EOF
-          
-          echo 'include ":app"' > settings.gradle
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
 
-      # ===== 3. СБОРКА APK =====
       - name: Build APK
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
@@ -631,270 +851,10 @@ jobs:
           export PATH="$PWD/gradle-8.5/bin:$PATH"
           gradle wrapper --gradle-version 8.5
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --parallel --build-cache
 
-      # ===== 4. СОЗДАНИЕ BOOT.IMG И ДОКУМЕНТАЦИИ =====
-      - name: Create Boot Image & Documentation
-        run: |
-          mkdir -p AetheriaOS_Release/docs
-          
-          # Создаем boot.img (просто kernel с заголовком Android Boot)
-          cp aetheria_kernel/kernel.bin AetheriaOS_Release/boot.img
-          
-          # Инструкция по установке на реальное устройство
-          cat > AetheriaOS_Release/INSTALLATION.md << 'EOF'
-          # 📱 AetheriaOS - Установка на реальное устройство
-          
-          ## ⚠️ ВНИМАНИЕ!
-          Установка собственной операционной системы на устройство - это **экспериментальная процедура**, 
-          которая может привести к **потере данных** и **выходу устройства из строя**.
-          
-          ---
-          
-          ## 🎮 БЫСТРЫЙ СТАРТ (Рекомендуется)
-          
-          ### Способ 1: Запуск через APK (БЕЗОПАСНО)
-          
-          Если вы просто хотите **посмотреть на ОС** и протестировать функционал:
-          
-          1. Установите **AetheriaOS-Apps.apk** на ваше Android-устройство
-          2. Запустите приложение
-          3. Вы увидите полнофункциональную ОС с терминалом и встроенными приложениями
-          4. Попробуйте команды:
-             - `help` - список команд
-             - `ls` - список приложений
-             - `run snake.ae` - запустить игру Змейка
-             - `run sysinfo.ae` - информация о системе
-             - `run bounce.ae` - анимация отскакивающего шарика
-          
-          **Преимущества этого способа:**
-          - ✅ Полностью безопасно
-          - ✅ Не требует разблокировки bootloader
-          - ✅ Не влияет на основную систему
-          - ✅ Можно удалить как обычное приложение
-          
-          ---
-          
-          ## 🔧 УСТАНОВКА НА "ЖЕЛЕЗО" (Для опытных пользователей)
-          
-          ### Требования:
-          - Разблокированный bootloader
-          - Установленный ADB и Fastboot
-          - **РЕЗЕРВНАЯ КОПИЯ ВСЕХ ДАННЫХ**
-          - Устройство на базе ARM64 (aarch64)
-          - Root-доступ (опционально, для некоторых методов)
-          
-          ---
-          
-          ### 📦 Содержимое архива:
-          
-          - `boot.img` - образ ядра AetheriaOS
-          - `kernel.bin` - чистое ядро без заголовков
-          - `AetheriaOS-Apps.apk` - APK для тестирования в Android
-          - `INSTALLATION.md` - эта инструкция
-          
-          ---
-          
-          ### Метод 1: Временная загрузка (НЕ перезаписывает систему)
-          
-          ```bash
-          # Перезагрузите устройство в режим fastboot
-          adb reboot bootloader
-          
-          # Загрузите AetheriaOS временно (без записи)
-          fastboot boot boot.img
-          
-          # Устройство загрузится в AetheriaOS
-          # При следующей перезагрузке вернется обычная система
-          ```
-          
-          **Примечание:** Этот метод безопасен, но требует экспериментов - 
-          возможно, потребуется доработка boot.img под конкретное устройство.
-          
-          ---
-          
-          ### Метод 2: Установка через TWRP/Custom Recovery
-          
-          1. Загрузитесь в TWRP Recovery
-          2. Сделайте резервную копию текущей системы
-          3. Прошейте boot.img:
-             ```bash
-             adb push boot.img /sdcard/
-             # В TWRP: Install > Install Image > boot.img > Boot partition
-             ```
-          4. Перезагрузите устройство
-          
-          ---
-          
-          ### Метод 3: Прямая запись (ОПАСНО!)
-          
-          ```bash
-          # ⚠️ ЭТО ПЕРЕЗАПИШЕТ ВАШ BOOT РАЗДЕЛ!
-          # Убедитесь, что у вас есть резервная копия!
-          
-          adb reboot bootloader
-          fastboot flash boot boot.img
-          fastboot reboot
-          ```
-          
-          ---
-          
-          ## 🛠️ Что делать, если что-то пошло не так?
-          
-          ### Устройство не загружается:
-          
-          1. **Восстановление через fastboot:**
-             ```bash
-             fastboot flash boot original_boot.img  # ваш оригинальный boot
-             fastboot reboot
-             ```
-          
-          2. **Восстановление через Recovery:**
-             - Загрузитесь в TWRP
-             - Восстановите резервную копию boot раздела
-          
-          3. **Полный сброс:**
-             ```bash
-             fastboot -w
-             fastboot reboot
-             ```
-          
-          ---
-          
-          ## 📋 Известные ограничения:
-          
-          - Нет поддержки графического интерфейса (только терминал)
-          - Нет драйверов для большинства устройств
-          - Нет сетевой подсистемы
-          - Нет файловой системы (используется виртуальная FS)
-          - Работает только базовая виртуальная машина AetherScript
-          
-          ---
-          
-          ## 🎯 Для чего это нужно?
-          
-          AetheriaOS - это **учебный проект**, демонстрирующий:
-          - Как работает ядро ОС на bare-metal уровне
-          - Принципы работы виртуальных машин
-          - Низкоуровневое программирование на Rust
-          - Создание собственных языков программирования (AetherScript)
-          
-          ---
-          
-          ## 💡 Рекомендации:
-          
-          1. **Для новичков:** Используйте APK-версию
-          2. **Для энтузиастов:** Попробуйте временную загрузку через `fastboot boot`
-          3. **Для разработчиков:** Изучите исходный код и адаптируйте под свое устройство
-          
-          ---
-          
-          ## 📞 Поддержка:
-          
-          Это экспериментальный проект. Используйте на свой риск.
-          Автор не несет ответственности за повреждение устройств.
-          
-          **Для безопасного тестирования всегда используйте APK-версию!**
-          
-          ---
-          
-          ## 🚀 Быстрая команда для APK:
-          
-          ```bash
-          # Установка APK
-          adb install AetheriaOS-Apps.apk
-          
-          # Запуск
-          adb shell am start -n com.aetheria.loader/.MainActivity
-          ```
-          
-          Приятного использования AetheriaOS! 🎉
-          EOF
-          
-          # Краткая инструкция в корне
-          cat > AetheriaOS_Release/README.md << 'EOF'
-          # 🌌 AetheriaOS v0.5
-          
-          **Операционная система с собственной виртуальной машиной AetherScript**
-          
-          ## 📦 Что в архиве?
-          
-          - `AetheriaOS-Apps.apk` - **APK для Android (РЕКОМЕНДУЕТСЯ для начала)**
-          - `boot.img` - Образ ядра для установки на устройство
-          - `kernel.bin` - Чистое ядро
-          - `INSTALLATION.md` - Подробная инструкция по установке
-          
-          ---
-          
-          ## 🎮 БЫСТРЫЙ СТАРТ
-          
-          ### Хотите просто посмотреть на ОС?
-          
-          1. Установите **AetheriaOS-Apps.apk**
-          2. Запустите приложение
-          3. Введите команду: `help`
-          4. Попробуйте: `run snake.ae`
-          
-          **Это безопасно и не требует root!**
-          
-          ---
-          
-          ## 🔧 Установка на реальное устройство
-          
-          ⚠️ **Только для опытных пользователей!**
-          
-          Смотрите файл **INSTALLATION.md** для подробных инструкций.
-          
-          ---
-          
-          ## 💻 Встроенные приложения (AetherScript):
-          
-          - `sysinfo.ae` - Информация о системе
-          - `snake.ae` - Игра "Змейка" (управление: W,A,S,D)
-          - `bounce.ae` - Анимация отскакивающего шарика
-          
-          ---
-          
-          ## 📝 Команды терминала:
-          
-          - `help` - Помощь
-          - `ls` - Список файлов
-          - `run <файл>` - Запустить приложение
-          - `clear` - Очистить экран
-          
-          ---
-          
-          ## 🌟 Особенности:
-          
-          - ✨ Ядро написано на Rust (bare-metal)
-          - 🖥️ Собственная виртуальная машина AetherScript
-          - 🎨 Framebuffer-графика
-          - 🎮 Встроенные игры и утилиты
-          - 📱 Поддержка ARM64
-          
-          ---
-          
-          **Автор:** AetheriaOS Team  
-          **Версия:** 0.5  
-          **Лицензия:** Experimental / Educational
-          EOF
-
-      # ===== 5. ПАКОВКА АРХИВА =====
-      - name: Package Release
-        run: |
-          cp app/build/outputs/apk/debug/app-debug.apk AetheriaOS_Release/AetheriaOS-Apps.apk
-          cp aetheria_kernel/kernel.bin AetheriaOS_Release/kernel.bin
-          
-          # Создаем финальный архив
-          cd AetheriaOS_Release
-          zip -r ../AetheriaOS-v0.5-Complete.zip .
-          cd ..
-          
-      - name: Upload OS Package
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AetheriaOS-Complete-Release
-          path: |
-            AetheriaOS-v0.5-Complete.zip
-            AetheriaOS_Release/
-          retention-days: 90
+          name: SecureVault_Ultimate
+          path: app/build/outputs/apk/debug/app-debug.apk
