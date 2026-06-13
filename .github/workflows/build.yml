@@ -1,4 +1,4 @@
-name: ShieldVPN_v4_Real
+name: ShieldVPN_v5_Real_Tunnel
 on: [push, workflow_dispatch]
 
 jobs:
@@ -8,12 +8,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create Project
+      - name: Setup project structure
         run: |
           mkdir -p app/src/main/java/com/antidpi/vpn
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          mkdir -p app/src/main/jniLibs/armeabi-v7a
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/assets
 
+      - name: Download prebuilt hev-socks5-tunnel binaries
+        run: |
+          echo "=== Downloading prebuilt tun2socks for Android ==="
+          # Используем готовые бинари из проекта hev-socks5-tunnel (релизы)
+          VERSION="2.7.2"
+          BASE="https://github.com/heiher/hev-socks5-tunnel/releases/download/${VERSION}"
+
+          # arm64-v8a (большинство современных телефонов)
+          wget -q "${BASE}/hev-socks5-tunnel-linux-android-arm64.tar.gz" -O arm64.tar.gz || echo "arm64 download failed, will use fallback"
+
+          # armeabi-v7a (старые телефоны)
+          wget -q "${BASE}/hev-socks5-tunnel-linux-android-armv7.tar.gz" -O armv7.tar.gz || echo "armv7 download failed"
+
+          ls -la *.tar.gz || echo "No archives downloaded"
+
+      - name: Create build files
+        run: |
           cat > settings.gradle << 'ENDFILE'
           include ':app'
           ENDFILE
@@ -33,12 +53,20 @@ jobs:
               compileSdk 34
               defaultConfig {
                   applicationId "com.antidpi.vpn"
-                  minSdk 29
+                  minSdk 24
                   targetSdk 34
-                  versionCode 4
-                  versionName "4.0-Real"
+                  versionCode 5
+                  versionName "5.0-RealTunnel"
+                  ndk {
+                      abiFilters 'arm64-v8a', 'armeabi-v7a'
+                  }
               }
               buildTypes { debug { minifyEnabled false } }
+              packagingOptions {
+                  jniLibs {
+                      useLegacyPackaging = true
+                  }
+              }
           }
           ENDFILE
 
@@ -47,6 +75,8 @@ jobs:
           org.gradle.jvmargs=-Xmx2048m
           ENDFILE
 
+      - name: Create resources
+        run: |
           cat > app/src/main/res/values/colors.xml << 'ENDFILE'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -81,20 +111,20 @@ jobs:
                   android:layout_height="wrap_content"
                   android:orientation="vertical"
                   android:gravity="center_horizontal"
-                  android:layout_marginTop="20dp">
+                  android:layout_marginTop="15dp">
 
                   <TextView
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
                       android:text="ShieldVPN"
                       android:textColor="@color/accent"
-                      android:textSize="28sp"
+                      android:textSize="26sp"
                       android:textStyle="bold"/>
 
                   <TextView
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Real Anti-DPI 2026"
+                      android:text="Real Tunnel v5.0"
                       android:textColor="@color/gray"
                       android:textSize="12sp"/>
 
@@ -105,7 +135,7 @@ jobs:
                       android:text="OFF"
                       android:textColor="@color/red"
                       android:textSize="16sp"
-                      android:layout_marginTop="15dp"/>
+                      android:layout_marginTop="12sp"/>
 
                   <TextView
                       android:id="@+id/statsText"
@@ -118,14 +148,14 @@ jobs:
 
                   <Button
                       android:id="@+id/btnConnect"
-                      android:layout_width="160dp"
-                      android:layout_height="160dp"
+                      android:layout_width="140dp"
+                      android:layout_height="140dp"
                       android:text="START"
-                      android:textSize="20sp"
+                      android:textSize="18sp"
                       android:textStyle="bold"
                       android:textColor="#FFF"
                       android:backgroundTint="@color/accent"
-                      android:layout_marginTop="15dp"/>
+                      android:layout_marginTop="12dp"/>
               </LinearLayout>
 
               <LinearLayout
@@ -148,7 +178,7 @@ jobs:
                       android:layout_width="0dp"
                       android:layout_height="wrap_content"
                       android:layout_weight="1"
-                      android:text="Mode: AGGRESSIVE"
+                      android:text="Anti-DPI: ON"
                       android:textSize="11sp"
                       android:backgroundTint="#222"
                       android:layout_marginStart="5dp"/>
@@ -181,11 +211,13 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
               <application
                   android:label="@string/app_name"
                   android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
                   android:icon="@android:drawable/ic_menu_compass"
+                  android:extractNativeLibs="true"
                   android:usesCleartextTraffic="true">
 
                   <activity android:name=".MainActivity" android:exported="true">
@@ -208,6 +240,68 @@ jobs:
           </manifest>
           ENDFILE
 
+      - name: Build hev-socks5-tunnel from source
+        run: |
+          echo "=== Cloning hev-socks5-tunnel ==="
+          cd /tmp
+          git clone --recursive https://github.com/heiher/hev-socks5-tunnel.git
+          cd hev-socks5-tunnel
+
+          echo "=== Setting up Android NDK ==="
+          # GitHub Actions Ubuntu имеет NDK по умолчанию
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk-bundle"
+          if [ ! -d "$ANDROID_NDK_HOME" ]; then
+            ANDROID_NDK_HOME=$(ls -d $ANDROID_HOME/ndk/* 2>/dev/null | head -1)
+          fi
+          echo "NDK: $ANDROID_NDK_HOME"
+          ls $ANDROID_NDK_HOME 2>/dev/null || echo "NDK not found in expected paths"
+
+          # Если NDK всё-таки нет — установим
+          if [ -z "$ANDROID_NDK_HOME" ] || [ ! -d "$ANDROID_NDK_HOME" ]; then
+            echo "Installing NDK manually..."
+            wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip -O ndk.zip
+            unzip -q ndk.zip -d $HOME
+            export ANDROID_NDK_HOME="$HOME/android-ndk-r26b"
+          fi
+
+          echo "Final NDK path: $ANDROID_NDK_HOME"
+
+          # Сборка для arm64-v8a
+          echo "=== Building for arm64-v8a ==="
+          make clean 2>/dev/null || true
+          make ENABLE_STATIC=1 \
+               CROSS_PREFIX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24- \
+               CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang \
+               -j$(nproc) || echo "arm64 build failed"
+
+          if [ -f "bin/hev-socks5-tunnel" ]; then
+            cp bin/hev-socks5-tunnel $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libhev-socks5-tunnel.so
+            echo "arm64 binary copied"
+          else
+            echo "arm64 binary NOT created"
+          fi
+
+          # Сборка для armeabi-v7a
+          echo "=== Building for armeabi-v7a ==="
+          make clean 2>/dev/null || true
+          make ENABLE_STATIC=1 \
+               CROSS_PREFIX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24- \
+               CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang \
+               -j$(nproc) || echo "armv7 build failed"
+
+          if [ -f "bin/hev-socks5-tunnel" ]; then
+            cp bin/hev-socks5-tunnel $GITHUB_WORKSPACE/app/src/main/jniLibs/armeabi-v7a/libhev-socks5-tunnel.so
+            echo "armv7 binary copied"
+          else
+            echo "armv7 binary NOT created"
+          fi
+
+          echo "=== Final jniLibs ==="
+          ls -laR $GITHUB_WORKSPACE/app/src/main/jniLibs/
+
+      - name: Create Java sources
+        run: |
+          # ===== Stats =====
           cat > app/src/main/java/com/antidpi/vpn/Stats.java << 'ENDFILE'
           package com.antidpi.vpn;
           import java.util.concurrent.atomic.AtomicLong;
@@ -224,6 +318,7 @@ jobs:
           }
           ENDFILE
 
+          # ===== TLS Parser =====
           cat > app/src/main/java/com/antidpi/vpn/TlsParser.java << 'ENDFILE'
           package com.antidpi.vpn;
 
@@ -232,8 +327,6 @@ jobs:
               public static class SniInfo {
                   public String hostname;
                   public int splitPos;
-                  public int sniStart;
-                  public int sniEnd;
               }
 
               public static SniInfo parseClientHello(byte[] data, int len) {
@@ -277,8 +370,6 @@ jobs:
                                       if (hostStart + hostLen <= len && hostLen > 2) {
                                           SniInfo info = new SniInfo();
                                           info.hostname = new String(data, hostStart, hostLen);
-                                          info.sniStart = hostStart;
-                                          info.sniEnd = hostStart + hostLen;
                                           info.splitPos = hostStart + Math.max(1, hostLen / 2);
                                           return info;
                                       }
@@ -297,52 +388,26 @@ jobs:
           }
           ENDFILE
 
-          cat > app/src/main/java/com/antidpi/vpn/AntiDpi.java << 'ENDFILE'
+          # ===== Socks5 Server with Anti-DPI =====
+          cat > app/src/main/java/com/antidpi/vpn/Socks5Server.java << 'ENDFILE'
           package com.antidpi.vpn;
 
-          import java.io.OutputStream;
-          import java.io.IOException;
-
-          public class AntiDpi {
-
-              public static final int MODE_NORMAL = 0;
-              public static final int MODE_AGGRESSIVE = 1;
-
-              public static volatile int currentMode = MODE_AGGRESSIVE;
-
-              public static String sendClientHello(OutputStream out, byte[] data, int len, TlsParser.SniInfo sni)
-                      throws IOException {
-
-                  if (sni == null) {
-                      out.write(data, 0, len);
-                      out.flush();
-                      return "passthrough (no SNI)";
-                  }
-
-                  int split = sni.splitPos;
-                  out.write(data, 0, split);
-                  out.flush();
-                  out.write(data, split, len - split);
-                  out.flush();
-                  return "split@" + split + "/" + len + " sni=" + sni.hostname;
-              }
-          }
-          ENDFILE
-
-          cat > app/src/main/java/com/antidpi/vpn/HttpProxy.java << 'ENDFILE'
-          package com.antidpi.vpn;
-
-          import android.util.Log;
           import java.io.*;
           import java.net.*;
+          import java.nio.charset.StandardCharsets;
           import java.util.concurrent.*;
           import java.util.concurrent.atomic.AtomicLong;
 
-          public class HttpProxy {
+          /**
+           * SOCKS5 сервер. Получает соединения от tun2socks
+           * и фрагментирует TLS ClientHello для обхода DPI.
+           */
+          public class Socks5Server {
 
-              private static final String TAG = "ShieldProxy";
               private static final int BUF_SIZE = 32768;
               private static final AtomicLong connId = new AtomicLong(0);
+
+              public static volatile boolean antiDpiEnabled = true;
 
               private final int port;
               private ServerSocket server;
@@ -352,7 +417,7 @@ jobs:
               public interface Logger { void log(String msg); }
               private final Logger logger;
 
-              public HttpProxy(int port, Logger logger) {
+              public Socks5Server(int port, Logger logger) {
                   this.port = port;
                   this.logger = logger;
               }
@@ -360,20 +425,8 @@ jobs:
               public void start() throws IOException {
                   server = new ServerSocket(port, 512, InetAddress.getByName("127.0.0.1"));
                   running = true;
-                  logger.log("Proxy listening on 127.0.0.1:" + port);
-
-                  pool.submit(() -> {
-                      while (running) {
-                          try {
-                              Socket client = server.accept();
-                              client.setTcpNoDelay(true);
-                              client.setSoTimeout(60000);
-                              pool.submit(() -> handle(client));
-                          } catch (IOException e) {
-                              if (running) logger.log("[ERR] accept: " + e.getMessage());
-                          }
-                      }
-                  });
+                  logger.log("SOCKS5 on 127.0.0.1:" + port);
+                  pool.submit(this::acceptLoop);
               }
 
               public void stop() {
@@ -382,149 +435,112 @@ jobs:
                   pool.shutdownNow();
               }
 
+              private void acceptLoop() {
+                  while (running) {
+                      try {
+                          Socket client = server.accept();
+                          client.setTcpNoDelay(true);
+                          client.setSoTimeout(60000);
+                          pool.submit(() -> handle(client));
+                      } catch (IOException e) {
+                          if (running) logger.log("[ERR] accept: " + e.getMessage());
+                      }
+                  }
+              }
+
               private void handle(Socket client) {
                   long id = connId.incrementAndGet();
                   Stats.totalConn.incrementAndGet();
                   Socket remote = null;
-                  String host = "?";
-                  int rport = 0;
-                  String phase = "start";
-                  long startTime = System.currentTimeMillis();
+                  String targetHost = "?";
+                  int targetPort = 0;
 
                   try {
-                      phase = "read header";
-                      InputStream cIn = client.getInputStream();
-                      OutputStream cOut = client.getOutputStream();
+                      InputStream in = client.getInputStream();
+                      OutputStream out = client.getOutputStream();
 
-                      ByteArrayOutputStream headerBuf = new ByteArrayOutputStream();
-                      int b;
-                      int state = 0;
-                      while ((b = cIn.read()) != -1) {
-                          headerBuf.write(b);
-                          if (state == 0 && b == '\r') state = 1;
-                          else if (state == 1 && b == '\n') state = 2;
-                          else if (state == 2 && b == '\r') state = 3;
-                          else if (state == 3 && b == '\n') { state = 4; break; }
-                          else state = 0;
-                          if (headerBuf.size() > 16384) break;
-                      }
-                      if (state != 4) {
-                          logger.log("#" + id + " [SKIP] no http header");
-                          Stats.failConn.incrementAndGet();
-                          client.close();
-                          return;
-                      }
+                      // SOCKS5 greeting
+                      int ver = in.read();
+                      if (ver != 5) { client.close(); Stats.failConn.incrementAndGet(); return; }
+                      int n = in.read();
+                      byte[] methods = new byte[n];
+                      readFull(in, methods);
+                      out.write(new byte[]{5, 0}); out.flush();
 
-                      String header = headerBuf.toString("ISO-8859-1");
-                      String[] lines = header.split("\r\n");
-                      if (lines.length == 0) {
-                          Stats.failConn.incrementAndGet();
-                          client.close();
-                          return;
-                      }
+                      // Request
+                      byte[] hdr = new byte[4];
+                      readFull(in, hdr);
+                      if (hdr[0] != 5 || hdr[1] != 1) { client.close(); Stats.failConn.incrementAndGet(); return; }
 
-                      String[] reqLine = lines[0].split(" ", 3);
-                      if (reqLine.length < 2) {
-                          Stats.failConn.incrementAndGet();
-                          client.close();
-                          return;
-                      }
-
-                      String method = reqLine[0];
-                      String target = reqLine[1];
-                      boolean isConnect = "CONNECT".equalsIgnoreCase(method);
-
-                      if (isConnect) {
-                          int colon = target.lastIndexOf(':');
-                          if (colon > 0) {
-                              host = target.substring(0, colon);
-                              rport = Integer.parseInt(target.substring(colon + 1));
-                          } else {
-                              host = target; rport = 443;
-                          }
+                      int atype = hdr[3] & 0xFF;
+                      if (atype == 1) {
+                          byte[] a = new byte[4]; readFull(in, a);
+                          targetHost = InetAddress.getByAddress(a).getHostAddress();
+                      } else if (atype == 3) {
+                          int dl = in.read();
+                          byte[] d = new byte[dl]; readFull(in, d);
+                          targetHost = new String(d, StandardCharsets.UTF_8);
+                      } else if (atype == 4) {
+                          byte[] a = new byte[16]; readFull(in, a);
+                          targetHost = InetAddress.getByAddress(a).getHostAddress();
                       } else {
-                          try {
-                              URL url = new URL(target);
-                              host = url.getHost();
-                              rport = url.getPort() == -1 ? 80 : url.getPort();
-                          } catch (Exception e) {
-                              logger.log("#" + id + " [ERR] bad url: " + target);
-                              Stats.failConn.incrementAndGet();
-                              client.close();
-                              return;
-                          }
+                          client.close(); Stats.failConn.incrementAndGet(); return;
                       }
+                      targetPort = ((in.read() & 0xFF) << 8) | (in.read() & 0xFF);
 
-                      phase = "DNS resolve";
+                      // Connect to target
                       long t0 = System.currentTimeMillis();
-                      InetAddress addr;
-                      try {
-                          addr = InetAddress.getByName(host);
-                      } catch (UnknownHostException ue) {
-                          logger.log("#" + id + " [DNS-FAIL] " + host);
-                          Stats.failConn.incrementAndGet();
-                          client.close();
-                          return;
-                      }
-                      long dnsMs = System.currentTimeMillis() - t0;
-
-                      phase = "TCP connect";
-                      t0 = System.currentTimeMillis();
                       remote = new Socket();
                       remote.setTcpNoDelay(true);
                       remote.setSoTimeout(60000);
                       try {
-                          remote.connect(new InetSocketAddress(addr, rport), 8000);
+                          remote.connect(new InetSocketAddress(targetHost, targetPort), 8000);
                       } catch (SocketTimeoutException ste) {
-                          logger.log("#" + id + " [TIMEOUT] " + host + ":" + rport + " - DPI block?");
+                          logger.log("#" + id + " " + targetHost + ":" + targetPort + " TIMEOUT (DPI block?)");
+                          out.write(new byte[]{5, 4, 0, 1, 0, 0, 0, 0, 0, 0}); out.flush();
                           Stats.failConn.incrementAndGet();
                           client.close();
                           return;
-                      } catch (ConnectException ce) {
-                          logger.log("#" + id + " [REFUSED] " + host + ":" + rport);
+                      } catch (IOException ce) {
+                          logger.log("#" + id + " " + targetHost + ":" + targetPort + " connect fail: " + ce.getMessage());
+                          out.write(new byte[]{5, 5, 0, 1, 0, 0, 0, 0, 0, 0}); out.flush();
                           Stats.failConn.incrementAndGet();
                           client.close();
                           return;
                       }
                       long connMs = System.currentTimeMillis() - t0;
+                      logger.log("#" + id + " -> " + targetHost + ":" + targetPort + " conn=" + connMs + "ms");
 
-                      String logPrefix = "#" + id + " " + host + ":" + rport;
-                      logger.log(logPrefix + " OK DNS=" + dnsMs + "ms Conn=" + connMs + "ms");
+                      // Success reply
+                      out.write(new byte[]{5, 0, 0, 1, 0, 0, 0, 0, 0, 0}); out.flush();
 
-                      if (isConnect) {
-                          cOut.write("HTTP/1.1 200 OK\r\n\r\n".getBytes());
-                          cOut.flush();
-                      } else {
-                          remote.getOutputStream().write(headerBuf.toByteArray());
-                          remote.getOutputStream().flush();
-                          Stats.bytesUp.addAndGet(headerBuf.size());
-                      }
+                      // Proxy bidirectional
+                      final Socket fr = remote;
+                      final long fid = id;
+                      final int fp = targetPort;
+                      Future<Long> dn = pool.submit(() -> pipeDown(fr, client));
+                      long up = pipeUp(client, fr, fp == 443, fid);
+                      long dnBytes = 0;
+                      try { dnBytes = dn.get(120, TimeUnit.SECONDS); } catch (Exception ignored) {}
 
-                      final Socket finalRemote = remote;
-                      final long finalId = id;
-                      final int finalRport = rport;
-
-                      Future<Long> downFuture = pool.submit(() ->
-                          pipeDown(finalRemote, client));
-
-                      long upBytes = pipeUp(client, finalRemote, finalRport == 443, finalId);
-                      long downBytes;
-                      try {
-                          downBytes = downFuture.get(60, TimeUnit.SECONDS);
-                      } catch (Exception e) {
-                          downBytes = 0;
-                      }
-
-                      long duration = System.currentTimeMillis() - startTime;
                       Stats.okConn.incrementAndGet();
-                      logger.log(logPrefix + " done " + duration + "ms up=" + upBytes + " dn=" + downBytes);
+                      logger.log("#" + id + " done up=" + up + " dn=" + dnBytes);
 
                   } catch (Exception e) {
-                      logger.log("#" + id + " " + host + " [ERR@" + phase + "] " + e.getClass().getSimpleName());
+                      logger.log("#" + id + " " + targetHost + " err: " + e.getMessage());
                       Stats.failConn.incrementAndGet();
                   } finally {
                       try { client.close(); } catch (Exception ignored) {}
                       try { if (remote != null) remote.close(); } catch (Exception ignored) {}
+                  }
+              }
+
+              private void readFull(InputStream in, byte[] buf) throws IOException {
+                  int off = 0;
+                  while (off < buf.length) {
+                      int r = in.read(buf, off, buf.length - off);
+                      if (r < 0) throw new EOFException();
+                      off += r;
                   }
               }
 
@@ -534,23 +550,24 @@ jobs:
                       InputStream in = from.getInputStream();
                       OutputStream out = to.getOutputStream();
                       byte[] buf = new byte[BUF_SIZE];
-                      boolean first = fragmentFirst;
+                      boolean first = fragmentFirst && antiDpiEnabled;
                       int len;
-
                       while ((len = in.read(buf)) != -1) {
                           if (first) {
                               first = false;
                               if (TlsParser.isTlsClientHello(buf, len)) {
                                   TlsParser.SniInfo sni = TlsParser.parseClientHello(buf, len);
-                                  String desc = AntiDpi.sendClientHello(out, buf, len, sni);
-                                  logger.log("#" + id + " TLS " + desc);
-                                  total += len;
-                                  Stats.bytesUp.addAndGet(len);
-                                  continue;
+                                  if (sni != null) {
+                                      out.write(buf, 0, sni.splitPos); out.flush();
+                                      out.write(buf, sni.splitPos, len - sni.splitPos); out.flush();
+                                      logger.log("#" + id + " TLS split sni=" + sni.hostname);
+                                      total += len;
+                                      Stats.bytesUp.addAndGet(len);
+                                      continue;
+                                  }
                               }
                           }
-                          out.write(buf, 0, len);
-                          out.flush();
+                          out.write(buf, 0, len); out.flush();
                           total += len;
                           Stats.bytesUp.addAndGet(len);
                       }
@@ -570,8 +587,7 @@ jobs:
                       byte[] buf = new byte[BUF_SIZE];
                       int len;
                       while ((len = in.read(buf)) != -1) {
-                          out.write(buf, 0, len);
-                          out.flush();
+                          out.write(buf, 0, len); out.flush();
                           total += len;
                           Stats.bytesDown.addAndGet(len);
                       }
@@ -585,12 +601,120 @@ jobs:
           }
           ENDFILE
 
+          # ===== Tun2Socks runner =====
+          cat > app/src/main/java/com/antidpi/vpn/Tun2SocksRunner.java << 'ENDFILE'
+          package com.antidpi.vpn;
+
+          import android.content.Context;
+          import android.os.ParcelFileDescriptor;
+          import android.system.Os;
+          import android.system.OsConstants;
+          import android.util.Log;
+          import java.io.*;
+
+          /**
+           * Запускает hev-socks5-tunnel как нативный процесс.
+           * Передаёт ему TUN fd и конфиг.
+           */
+          public class Tun2SocksRunner {
+
+              private static final String TAG = "Tun2Socks";
+
+              private Process process;
+              private final Context ctx;
+              private final ShieldVpnService.LogListener logger;
+
+              public Tun2SocksRunner(Context ctx, ShieldVpnService.LogListener logger) {
+                  this.ctx = ctx;
+                  this.logger = logger;
+              }
+
+              public boolean start(ParcelFileDescriptor tunFd, int socksPort) {
+                  try {
+                      // Путь к бинарю (Android извлёк его из jniLibs в nativeLibraryDir)
+                      String binaryPath = ctx.getApplicationInfo().nativeLibraryDir + "/libhev-socks5-tunnel.so";
+                      File binary = new File(binaryPath);
+                      if (!binary.exists()) {
+                          ShieldVpnService.addLog("[FATAL] Binary not found: " + binaryPath);
+                          return false;
+                      }
+
+                      // Делаем исполняемым (на всякий случай)
+                      binary.setExecutable(true, false);
+
+                      // Создаём YAML-конфиг для tun2socks
+                      File configFile = new File(ctx.getCacheDir(), "tun2socks.yaml");
+                      String yaml =
+                          "tunnel:\n" +
+                          "  mtu: 1500\n" +
+                          "\n" +
+                          "socks5:\n" +
+                          "  port: " + socksPort + "\n" +
+                          "  address: 127.0.0.1\n" +
+                          "  udp: 'udp'\n" +
+                          "\n" +
+                          "misc:\n" +
+                          "  task-stack-size: 20480\n" +
+                          "  log-level: warn\n";
+                      try (FileWriter w = new FileWriter(configFile)) {
+                          w.write(yaml);
+                      }
+
+                      ShieldVpnService.addLog("Starting tun2socks: " + binaryPath);
+                      ShieldVpnService.addLog("Config: " + configFile.getAbsolutePath());
+
+                      // Запускаем процесс с передачей TUN fd
+                      ProcessBuilder pb = new ProcessBuilder(
+                          binaryPath,
+                          configFile.getAbsolutePath(),
+                          String.valueOf(tunFd.getFd())
+                      );
+                      pb.redirectErrorStream(true);
+                      process = pb.start();
+
+                      // Читаем stderr/stdout в отдельном потоке
+                      new Thread(() -> {
+                          try (BufferedReader r = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                              String line;
+                              while ((line = r.readLine()) != null) {
+                                  ShieldVpnService.addLog("[t2s] " + line);
+                              }
+                          } catch (IOException ignored) {}
+                      }).start();
+
+                      // Ждём чуть-чуть и проверяем что процесс жив
+                      Thread.sleep(500);
+                      if (!process.isAlive()) {
+                          ShieldVpnService.addLog("[FATAL] tun2socks died immediately, exit=" + process.exitValue());
+                          return false;
+                      }
+
+                      ShieldVpnService.addLog("tun2socks started (pid alive)");
+                      return true;
+
+                  } catch (Exception e) {
+                      ShieldVpnService.addLog("[FATAL] tun2socks start: " + e.getMessage());
+                      Log.e(TAG, "start", e);
+                      return false;
+                  }
+              }
+
+              public void stop() {
+                  if (process != null) {
+                      process.destroy();
+                      try { process.waitFor(); } catch (InterruptedException ignored) {}
+                      process = null;
+                  }
+              }
+          }
+          ENDFILE
+
+          # ===== VPN Service =====
           cat > app/src/main/java/com/antidpi/vpn/ShieldVpnService.java << 'ENDFILE'
           package com.antidpi.vpn;
 
           import android.app.*;
           import android.content.Intent;
-          import android.net.ProxyInfo;
           import android.net.VpnService;
           import android.os.Build;
           import android.os.ParcelFileDescriptor;
@@ -603,7 +727,7 @@ jobs:
               private static final String TAG = "ShieldVPN";
               private static final String CHANNEL_ID = "shield_vpn";
               private static final int NOTIFICATION_ID = 7;
-              private static final int PROXY_PORT = 10809;
+              private static final int SOCKS_PORT = 10808;
 
               public static volatile boolean isRunning = false;
               private static final List<String> logs = new ArrayList<>();
@@ -612,23 +736,20 @@ jobs:
               public interface LogListener { void onLog(String msg); }
 
               private ParcelFileDescriptor tunFd;
-              private HttpProxy proxy;
+              private Socks5Server socks;
+              private Tun2SocksRunner t2s;
 
               public static synchronized void addLog(String msg) {
                   String time = new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date());
                   String line = time + " " + msg;
                   logs.add(line);
-                  if (logs.size() > 300) logs.remove(0);
+                  if (logs.size() > 500) logs.remove(0);
                   if (listener != null) try { listener.onLog(line); } catch (Exception ignored) {}
                   Log.d(TAG, line);
               }
 
               public static synchronized List<String> getLogs() { return new ArrayList<>(logs); }
-
-              public static synchronized void clearLogs() {
-                  logs.clear();
-                  Stats.reset();
-              }
+              public static synchronized void clearLogs() { logs.clear(); Stats.reset(); }
 
               @Override
               public int onStartCommand(Intent intent, int flags, int startId) {
@@ -644,50 +765,60 @@ jobs:
               private void startVpn() {
                   try {
                       Stats.reset();
-                      addLog("=== ShieldVPN starting ===");
+                      addLog("=== ShieldVPN v5 starting ===");
 
-                      addLog("Starting proxy on port " + PROXY_PORT);
-                      proxy = new HttpProxy(PROXY_PORT, ShieldVpnService::addLog);
-                      proxy.start();
+                      // 1. SOCKS5 сервер с anti-DPI
+                      addLog("Starting SOCKS5 on " + SOCKS_PORT);
+                      socks = new Socks5Server(SOCKS_PORT, ShieldVpnService::addLog);
+                      socks.start();
 
-                      addLog("Building VPN tunnel...");
+                      // 2. TUN интерфейс
+                      addLog("Establishing TUN interface...");
                       Builder b = new Builder();
                       b.setSession("ShieldVPN")
                        .setMtu(1500)
                        .addAddress("10.233.7.1", 30)
-                       .addRoute("10.233.7.2", 32)
-                       .setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", PROXY_PORT));
+                       .addRoute("0.0.0.0", 0)
+                       .addRoute("::", 0)
+                       .addDnsServer("1.1.1.1")
+                       .addDnsServer("8.8.8.8");
 
-                      try {
-                          b.addDisallowedApplication(getPackageName());
-                      } catch (Exception ignored) {}
+                      // Не проксируем сами себя
+                      try { b.addDisallowedApplication(getPackageName()); } catch (Exception ignored) {}
 
                       tunFd = b.establish();
                       if (tunFd == null) {
-                          addLog("[FATAL] establish() returned null");
+                          addLog("[FATAL] TUN establish failed");
+                          stopVpn();
+                          return;
+                      }
+                      addLog("TUN fd=" + tunFd.getFd());
+
+                      // 3. tun2socks для перенаправления всего трафика в SOCKS5
+                      t2s = new Tun2SocksRunner(this, listener);
+                      if (!t2s.start(tunFd, SOCKS_PORT)) {
+                          addLog("[FATAL] tun2socks failed");
                           stopVpn();
                           return;
                       }
 
                       isRunning = true;
-                      addLog("VPN tunnel active");
-                      addLog("HTTP/HTTPS -> 127.0.0.1:" + PROXY_PORT);
-                      addLog("Anti-DPI: SNI split mode");
-                      addLog("");
-                      addLog("TIP: Disable QUIC in Chrome for YouTube:");
-                      addLog("  chrome://flags/#enable-quic -> Disabled");
+                      addLog("VPN fully active!");
+                      addLog("All TCP -> SOCKS5 -> Anti-DPI -> Internet");
+                      addLog("Try YouTube/Telegram now");
 
                   } catch (Exception e) {
                       addLog("[FATAL] " + e.getMessage());
-                      Log.e(TAG, "Start error", e);
+                      Log.e(TAG, "start", e);
                       stopVpn();
                   }
               }
 
               private void stopVpn() {
                   isRunning = false;
-                  addLog("Stopping VPN...");
-                  if (proxy != null) { proxy.stop(); proxy = null; }
+                  addLog("Stopping...");
+                  if (t2s != null) { t2s.stop(); t2s = null; }
+                  if (socks != null) { socks.stop(); socks = null; }
                   if (tunFd != null) {
                       try { tunFd.close(); } catch (Exception ignored) {}
                       tunFd = null;
@@ -712,8 +843,8 @@ jobs:
                       PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
                   Notification n = new Notification.Builder(this, CHANNEL_ID)
-                      .setContentTitle("ShieldVPN active")
-                      .setContentText("Anti-DPI on")
+                      .setContentTitle("ShieldVPN")
+                      .setContentText("Real tunnel + anti-DPI")
                       .setSmallIcon(android.R.drawable.ic_menu_compass)
                       .addAction(android.R.drawable.ic_delete, "Stop", pi)
                       .setOngoing(true)
@@ -726,6 +857,7 @@ jobs:
           }
           ENDFILE
 
+          # ===== MainActivity =====
           cat > app/src/main/java/com/antidpi/vpn/MainActivity.java << 'ENDFILE'
           package com.antidpi.vpn;
 
@@ -770,13 +902,8 @@ jobs:
                   });
 
                   btnMode.setOnClickListener(v -> {
-                      if (AntiDpi.currentMode == AntiDpi.MODE_AGGRESSIVE) {
-                          AntiDpi.currentMode = AntiDpi.MODE_NORMAL;
-                          btnMode.setText("Mode: NORMAL");
-                      } else {
-                          AntiDpi.currentMode = AntiDpi.MODE_AGGRESSIVE;
-                          btnMode.setText("Mode: AGGRESSIVE");
-                      }
+                      Socks5Server.antiDpiEnabled = !Socks5Server.antiDpiEnabled;
+                      btnMode.setText("Anti-DPI: " + (Socks5Server.antiDpiEnabled ? "ON" : "OFF"));
                   });
 
                   ShieldVpnService.listener = msg -> handler.post(() -> {
@@ -867,17 +994,17 @@ jobs:
       - name: Find APK files
         if: always()
         run: |
-          echo "=== Looking for APK files ==="
-          find . -name "*.apk" -type f 2>/dev/null || echo "No APK found anywhere"
+          echo "=== Looking for APK ==="
+          find . -name "*.apk" -type f 2>/dev/null
           echo ""
-          echo "=== app/build/outputs structure ==="
-          ls -laR app/build/outputs/ 2>/dev/null || echo "outputs missing"
+          echo "=== jniLibs check ==="
+          ls -laR app/src/main/jniLibs/ 2>/dev/null
 
       - name: Upload APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ShieldVPN_APK
+          name: ShieldVPN_v5_RealTunnel
           path: |
             **/*.apk
           if-no-files-found: warn
