@@ -86,7 +86,7 @@ jobs:
                   <TextView
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="🛡️ ShieldVPN"
+                      android:text="ShieldVPN"
                       android:textColor="@color/accent"
                       android:textSize="28sp"
                       android:textStyle="bold"/>
@@ -102,7 +102,7 @@ jobs:
                       android:id="@+id/statusText"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="● OFF"
+                      android:text="OFF"
                       android:textColor="@color/red"
                       android:textSize="16sp"
                       android:layout_marginTop="15dp"/>
@@ -208,7 +208,6 @@ jobs:
           </manifest>
           ENDFILE
 
-          # ===== Stats =====
           cat > app/src/main/java/com/antidpi/vpn/Stats.java << 'ENDFILE'
           package com.antidpi.vpn;
           import java.util.concurrent.atomic.AtomicLong;
@@ -225,7 +224,6 @@ jobs:
           }
           ENDFILE
 
-          # ===== TLS Parser =====
           cat > app/src/main/java/com/antidpi/vpn/TlsParser.java << 'ENDFILE'
           package com.antidpi.vpn;
 
@@ -299,18 +297,12 @@ jobs:
           }
           ENDFILE
 
-          # ===== Anti-DPI engine =====
           cat > app/src/main/java/com/antidpi/vpn/AntiDpi.java << 'ENDFILE'
           package com.antidpi.vpn;
 
           import java.io.OutputStream;
           import java.io.IOException;
 
-          /**
-           * Anti-DPI техники:
-           * MODE_NORMAL - просто split SNI на 2 части
-           * MODE_AGGRESSIVE - split + fake ClientHello + disorder
-           */
           public class AntiDpi {
 
               public static final int MODE_NORMAL = 0;
@@ -318,45 +310,25 @@ jobs:
 
               public static volatile int currentMode = MODE_AGGRESSIVE;
 
-              /**
-               * Отправка ClientHello с anti-DPI обработкой.
-               * Возвращает описание того, что сделали (для логов).
-               */
               public static String sendClientHello(OutputStream out, byte[] data, int len, TlsParser.SniInfo sni)
                       throws IOException {
 
-                  if (sni == null || currentMode == MODE_NORMAL && sni == null) {
+                  if (sni == null) {
                       out.write(data, 0, len);
                       out.flush();
-                      return "passthrough (no SNI found)";
+                      return "passthrough (no SNI)";
                   }
 
                   int split = sni.splitPos;
-
-                  if (currentMode == MODE_AGGRESSIVE) {
-                      // 1. Disorder: пишем вторую половину сначала,
-                      //    потом первую. Реальный TCP всё равно соберёт по seq,
-                      //    но DPI на лету может запутаться.
-                      // На JVM-уровне это просто 2 write() — но с реверс-порядком.
-                      // Многие DPI парсят TLS поточно и ломаются.
-                      out.write(data, 0, split);
-                      out.flush();
-                      out.write(data, split, len - split);
-                      out.flush();
-                      return "AGGRESSIVE split@" + split + "/" + len + " sni=" + sni.hostname;
-                  } else {
-                      // Просто split на 2 части
-                      out.write(data, 0, split);
-                      out.flush();
-                      out.write(data, split, len - split);
-                      out.flush();
-                      return "split@" + split + "/" + len + " sni=" + sni.hostname;
-                  }
+                  out.write(data, 0, split);
+                  out.flush();
+                  out.write(data, split, len - split);
+                  out.flush();
+                  return "split@" + split + "/" + len + " sni=" + sni.hostname;
               }
           }
           ENDFILE
 
-          # ===== HTTP PROXY с подробными логами =====
           cat > app/src/main/java/com/antidpi/vpn/HttpProxy.java << 'ENDFILE'
           package com.antidpi.vpn;
 
@@ -402,4 +374,511 @@ jobs:
                           }
                       }
                   });
-              
+              }
+
+              public void stop() {
+                  running = false;
+                  try { if (server != null) server.close(); } catch (IOException ignored) {}
+                  pool.shutdownNow();
+              }
+
+              private void handle(Socket client) {
+                  long id = connId.incrementAndGet();
+                  Stats.totalConn.incrementAndGet();
+                  Socket remote = null;
+                  String host = "?";
+                  int rport = 0;
+                  String phase = "start";
+                  long startTime = System.currentTimeMillis();
+
+                  try {
+                      phase = "read header";
+                      InputStream cIn = client.getInputStream();
+                      OutputStream cOut = client.getOutputStream();
+
+                      ByteArrayOutputStream headerBuf = new ByteArrayOutputStream();
+                      int b;
+                      int state = 0;
+                      while ((b = cIn.read()) != -1) {
+                          headerBuf.write(b);
+                          if (state == 0 && b == '\r') state = 1;
+                          else if (state == 1 && b == '\n') state = 2;
+                          else if (state == 2 && b == '\r') state = 3;
+                          else if (state == 3 && b == '\n') { state = 4; break; }
+                          else state = 0;
+                          if (headerBuf.size() > 16384) break;
+                      }
+                      if (state != 4) {
+                          logger.log("#" + id + " [SKIP] no http header");
+                          Stats.failConn.incrementAndGet();
+                          client.close();
+                          return;
+                      }
+
+                      String header = headerBuf.toString("ISO-8859-1");
+                      String[] lines = header.split("\r\n");
+                      if (lines.length == 0) {
+                          Stats.failConn.incrementAndGet();
+                          client.close();
+                          return;
+                      }
+
+                      String[] reqLine = lines[0].split(" ", 3);
+                      if (reqLine.length < 2) {
+                          Stats.failConn.incrementAndGet();
+                          client.close();
+                          return;
+                      }
+
+                      String method = reqLine[0];
+                      String target = reqLine[1];
+                      boolean isConnect = "CONNECT".equalsIgnoreCase(method);
+
+                      if (isConnect) {
+                          int colon = target.lastIndexOf(':');
+                          if (colon > 0) {
+                              host = target.substring(0, colon);
+                              rport = Integer.parseInt(target.substring(colon + 1));
+                          } else {
+                              host = target; rport = 443;
+                          }
+                      } else {
+                          try {
+                              URL url = new URL(target);
+                              host = url.getHost();
+                              rport = url.getPort() == -1 ? 80 : url.getPort();
+                          } catch (Exception e) {
+                              logger.log("#" + id + " [ERR] bad url: " + target);
+                              Stats.failConn.incrementAndGet();
+                              client.close();
+                              return;
+                          }
+                      }
+
+                      phase = "DNS resolve";
+                      long t0 = System.currentTimeMillis();
+                      InetAddress addr;
+                      try {
+                          addr = InetAddress.getByName(host);
+                      } catch (UnknownHostException ue) {
+                          logger.log("#" + id + " [DNS-FAIL] " + host);
+                          Stats.failConn.incrementAndGet();
+                          client.close();
+                          return;
+                      }
+                      long dnsMs = System.currentTimeMillis() - t0;
+
+                      phase = "TCP connect";
+                      t0 = System.currentTimeMillis();
+                      remote = new Socket();
+                      remote.setTcpNoDelay(true);
+                      remote.setSoTimeout(60000);
+                      try {
+                          remote.connect(new InetSocketAddress(addr, rport), 8000);
+                      } catch (SocketTimeoutException ste) {
+                          logger.log("#" + id + " [TIMEOUT] " + host + ":" + rport + " - DPI block?");
+                          Stats.failConn.incrementAndGet();
+                          client.close();
+                          return;
+                      } catch (ConnectException ce) {
+                          logger.log("#" + id + " [REFUSED] " + host + ":" + rport);
+                          Stats.failConn.incrementAndGet();
+                          client.close();
+                          return;
+                      }
+                      long connMs = System.currentTimeMillis() - t0;
+
+                      String logPrefix = "#" + id + " " + host + ":" + rport;
+                      logger.log(logPrefix + " OK DNS=" + dnsMs + "ms Conn=" + connMs + "ms");
+
+                      if (isConnect) {
+                          cOut.write("HTTP/1.1 200 OK\r\n\r\n".getBytes());
+                          cOut.flush();
+                      } else {
+                          remote.getOutputStream().write(headerBuf.toByteArray());
+                          remote.getOutputStream().flush();
+                          Stats.bytesUp.addAndGet(headerBuf.size());
+                      }
+
+                      final Socket finalRemote = remote;
+                      final long finalId = id;
+                      final int finalRport = rport;
+
+                      Future<Long> downFuture = pool.submit(() ->
+                          pipeDown(finalRemote, client));
+
+                      long upBytes = pipeUp(client, finalRemote, finalRport == 443, finalId);
+                      long downBytes;
+                      try {
+                          downBytes = downFuture.get(60, TimeUnit.SECONDS);
+                      } catch (Exception e) {
+                          downBytes = 0;
+                      }
+
+                      long duration = System.currentTimeMillis() - startTime;
+                      Stats.okConn.incrementAndGet();
+                      logger.log(logPrefix + " done " + duration + "ms up=" + upBytes + " dn=" + downBytes);
+
+                  } catch (Exception e) {
+                      logger.log("#" + id + " " + host + " [ERR@" + phase + "] " + e.getClass().getSimpleName());
+                      Stats.failConn.incrementAndGet();
+                  } finally {
+                      try { client.close(); } catch (Exception ignored) {}
+                      try { if (remote != null) remote.close(); } catch (Exception ignored) {}
+                  }
+              }
+
+              private long pipeUp(Socket from, Socket to, boolean fragmentFirst, long id) {
+                  long total = 0;
+                  try {
+                      InputStream in = from.getInputStream();
+                      OutputStream out = to.getOutputStream();
+                      byte[] buf = new byte[BUF_SIZE];
+                      boolean first = fragmentFirst;
+                      int len;
+
+                      while ((len = in.read(buf)) != -1) {
+                          if (first) {
+                              first = false;
+                              if (TlsParser.isTlsClientHello(buf, len)) {
+                                  TlsParser.SniInfo sni = TlsParser.parseClientHello(buf, len);
+                                  String desc = AntiDpi.sendClientHello(out, buf, len, sni);
+                                  logger.log("#" + id + " TLS " + desc);
+                                  total += len;
+                                  Stats.bytesUp.addAndGet(len);
+                                  continue;
+                              }
+                          }
+                          out.write(buf, 0, len);
+                          out.flush();
+                          total += len;
+                          Stats.bytesUp.addAndGet(len);
+                      }
+                  } catch (IOException ignored) {
+                  } finally {
+                      try { from.close(); } catch (IOException ignored) {}
+                      try { to.close(); } catch (IOException ignored) {}
+                  }
+                  return total;
+              }
+
+              private long pipeDown(Socket from, Socket to) {
+                  long total = 0;
+                  try {
+                      InputStream in = from.getInputStream();
+                      OutputStream out = to.getOutputStream();
+                      byte[] buf = new byte[BUF_SIZE];
+                      int len;
+                      while ((len = in.read(buf)) != -1) {
+                          out.write(buf, 0, len);
+                          out.flush();
+                          total += len;
+                          Stats.bytesDown.addAndGet(len);
+                      }
+                  } catch (IOException ignored) {
+                  } finally {
+                      try { from.close(); } catch (IOException ignored) {}
+                      try { to.close(); } catch (IOException ignored) {}
+                  }
+                  return total;
+              }
+          }
+          ENDFILE
+
+          cat > app/src/main/java/com/antidpi/vpn/ShieldVpnService.java << 'ENDFILE'
+          package com.antidpi.vpn;
+
+          import android.app.*;
+          import android.content.Intent;
+          import android.net.ProxyInfo;
+          import android.net.VpnService;
+          import android.os.Build;
+          import android.os.ParcelFileDescriptor;
+          import android.util.Log;
+          import java.util.ArrayList;
+          import java.util.List;
+
+          public class ShieldVpnService extends VpnService {
+
+              private static final String TAG = "ShieldVPN";
+              private static final String CHANNEL_ID = "shield_vpn";
+              private static final int NOTIFICATION_ID = 7;
+              private static final int PROXY_PORT = 10809;
+
+              public static volatile boolean isRunning = false;
+              private static final List<String> logs = new ArrayList<>();
+              public static volatile LogListener listener;
+
+              public interface LogListener { void onLog(String msg); }
+
+              private ParcelFileDescriptor tunFd;
+              private HttpProxy proxy;
+
+              public static synchronized void addLog(String msg) {
+                  String time = new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date());
+                  String line = time + " " + msg;
+                  logs.add(line);
+                  if (logs.size() > 300) logs.remove(0);
+                  if (listener != null) try { listener.onLog(line); } catch (Exception ignored) {}
+                  Log.d(TAG, line);
+              }
+
+              public static synchronized List<String> getLogs() { return new ArrayList<>(logs); }
+
+              public static synchronized void clearLogs() {
+                  logs.clear();
+                  Stats.reset();
+              }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  if (intent != null && "STOP".equals(intent.getAction())) {
+                      stopVpn();
+                      return START_NOT_STICKY;
+                  }
+                  showNotification();
+                  startVpn();
+                  return START_STICKY;
+              }
+
+              private void startVpn() {
+                  try {
+                      Stats.reset();
+                      addLog("=== ShieldVPN starting ===");
+
+                      addLog("Starting proxy on port " + PROXY_PORT);
+                      proxy = new HttpProxy(PROXY_PORT, ShieldVpnService::addLog);
+                      proxy.start();
+
+                      addLog("Building VPN tunnel...");
+                      Builder b = new Builder();
+                      b.setSession("ShieldVPN")
+                       .setMtu(1500)
+                       .addAddress("10.233.7.1", 30)
+                       .addRoute("10.233.7.2", 32)
+                       .setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", PROXY_PORT));
+
+                      try {
+                          b.addDisallowedApplication(getPackageName());
+                      } catch (Exception ignored) {}
+
+                      tunFd = b.establish();
+                      if (tunFd == null) {
+                          addLog("[FATAL] establish() returned null");
+                          stopVpn();
+                          return;
+                      }
+
+                      isRunning = true;
+                      addLog("VPN tunnel active");
+                      addLog("HTTP/HTTPS -> 127.0.0.1:" + PROXY_PORT);
+                      addLog("Anti-DPI: SNI split mode");
+                      addLog("");
+                      addLog("TIP: Disable QUIC in Chrome for YouTube:");
+                      addLog("  chrome://flags/#enable-quic -> Disabled");
+
+                  } catch (Exception e) {
+                      addLog("[FATAL] " + e.getMessage());
+                      Log.e(TAG, "Start error", e);
+                      stopVpn();
+                  }
+              }
+
+              private void stopVpn() {
+                  isRunning = false;
+                  addLog("Stopping VPN...");
+                  if (proxy != null) { proxy.stop(); proxy = null; }
+                  if (tunFd != null) {
+                      try { tunFd.close(); } catch (Exception ignored) {}
+                      tunFd = null;
+                  }
+                  addLog("Stopped. Total: " + Stats.totalConn.get() +
+                         " OK: " + Stats.okConn.get() +
+                         " Fail: " + Stats.failConn.get());
+                  stopForeground(true);
+                  stopSelf();
+              }
+
+              private void showNotification() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationChannel ch = new NotificationChannel(
+                          CHANNEL_ID, "ShieldVPN", NotificationManager.IMPORTANCE_LOW);
+                      NotificationManager nm = getSystemService(NotificationManager.class);
+                      if (nm != null) nm.createNotificationChannel(ch);
+                  }
+                  Intent stop = new Intent(this, ShieldVpnService.class);
+                  stop.setAction("STOP");
+                  PendingIntent pi = PendingIntent.getService(this, 0, stop,
+                      PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+                  Notification n = new Notification.Builder(this, CHANNEL_ID)
+                      .setContentTitle("ShieldVPN active")
+                      .setContentText("Anti-DPI on")
+                      .setSmallIcon(android.R.drawable.ic_menu_compass)
+                      .addAction(android.R.drawable.ic_delete, "Stop", pi)
+                      .setOngoing(true)
+                      .build();
+                  startForeground(NOTIFICATION_ID, n);
+              }
+
+              @Override public void onDestroy() { stopVpn(); super.onDestroy(); }
+              @Override public void onRevoke() { stopVpn(); super.onRevoke(); }
+          }
+          ENDFILE
+
+          cat > app/src/main/java/com/antidpi/vpn/MainActivity.java << 'ENDFILE'
+          package com.antidpi.vpn;
+
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.net.VpnService;
+          import android.os.Bundle;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.widget.*;
+
+          public class MainActivity extends Activity {
+
+              private static final int VPN_REQ = 100;
+              private TextView statusText, logView, statsText;
+              private ScrollView logScroll;
+              private Button btnConnect, btnClear, btnMode;
+              private boolean connected = false;
+              private final Handler handler = new Handler(Looper.getMainLooper());
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  setContentView(R.layout.activity_main);
+
+                  statusText = findViewById(R.id.statusText);
+                  statsText = findViewById(R.id.statsText);
+                  logView = findViewById(R.id.logView);
+                  logScroll = findViewById(R.id.logScroll);
+                  btnConnect = findViewById(R.id.btnConnect);
+                  btnClear = findViewById(R.id.btnClear);
+                  btnMode = findViewById(R.id.btnMode);
+
+                  btnConnect.setOnClickListener(v -> {
+                      if (!ShieldVpnService.isRunning) startVpn();
+                      else stopVpn();
+                  });
+
+                  btnClear.setOnClickListener(v -> {
+                      ShieldVpnService.clearLogs();
+                      logView.setText("");
+                  });
+
+                  btnMode.setOnClickListener(v -> {
+                      if (AntiDpi.currentMode == AntiDpi.MODE_AGGRESSIVE) {
+                          AntiDpi.currentMode = AntiDpi.MODE_NORMAL;
+                          btnMode.setText("Mode: NORMAL");
+                      } else {
+                          AntiDpi.currentMode = AntiDpi.MODE_AGGRESSIVE;
+                          btnMode.setText("Mode: AGGRESSIVE");
+                      }
+                  });
+
+                  ShieldVpnService.listener = msg -> handler.post(() -> {
+                      logView.append(msg + "\n");
+                      logScroll.post(() -> logScroll.fullScroll(ScrollView.FOCUS_DOWN));
+                  });
+
+                  for (String s : ShieldVpnService.getLogs()) logView.append(s + "\n");
+
+                  handler.postDelayed(new Runnable() {
+                      @Override public void run() {
+                          updateUi();
+                          handler.postDelayed(this, 1000);
+                      }
+                  }, 500);
+              }
+
+              private void startVpn() {
+                  logView.append("Requesting VPN permission...\n");
+                  Intent prep = VpnService.prepare(this);
+                  if (prep != null) startActivityForResult(prep, VPN_REQ);
+                  else launch();
+              }
+
+              private void stopVpn() {
+                  Intent i = new Intent(this, ShieldVpnService.class);
+                  i.setAction("STOP");
+                  startService(i);
+              }
+
+              @Override
+              protected void onActivityResult(int rc, int res, Intent data) {
+                  super.onActivityResult(rc, res, data);
+                  if (rc == VPN_REQ && res == RESULT_OK) launch();
+                  else if (rc == VPN_REQ) logView.append("Permission denied\n");
+              }
+
+              private void launch() {
+                  Intent i = new Intent(this, ShieldVpnService.class);
+                  startForegroundService(i);
+              }
+
+              private void updateUi() {
+                  boolean nowRunning = ShieldVpnService.isRunning;
+                  if (nowRunning != connected) {
+                      connected = nowRunning;
+                      if (connected) {
+                          statusText.setText("ON");
+                          statusText.setTextColor(getColor(R.color.green));
+                          btnConnect.setText("STOP");
+                          btnConnect.setBackgroundTintList(getColorStateList(R.color.red));
+                      } else {
+                          statusText.setText("OFF");
+                          statusText.setTextColor(getColor(R.color.red));
+                          btnConnect.setText("START");
+                          btnConnect.setBackgroundTintList(getColorStateList(R.color.accent));
+                      }
+                  }
+                  statsText.setText("Conn: " + Stats.totalConn.get() +
+                                   " | OK: " + Stats.okConn.get() +
+                                   " | Fail: " + Stats.failConn.get() +
+                                   " | UP " + (Stats.bytesUp.get() / 1024) + "KB" +
+                                   " DN " + (Stats.bytesDown.get() / 1024) + "KB");
+              }
+
+              @Override
+              protected void onDestroy() {
+                  ShieldVpnService.listener = null;
+                  super.onDestroy();
+              }
+          }
+          ENDFILE
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.2'
+
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Find APK files
+        if: always()
+        run: |
+          echo "=== Looking for APK files ==="
+          find . -name "*.apk" -type f 2>/dev/null || echo "No APK found anywhere"
+          echo ""
+          echo "=== app/build/outputs structure ==="
+          ls -laR app/build/outputs/ 2>/dev/null || echo "outputs missing"
+
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShieldVPN_APK
+          path: |
+            **/*.apk
+          if-no-files-found: warn
+          retention-days: 30
