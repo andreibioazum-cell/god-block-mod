@@ -1,187 +1,85 @@
-name: Setup_ShieldVPN_From_ByeDPI
+name: Build_ByeDPI
 on: [workflow_dispatch]
 
-permissions:
-  contents: write
-  actions: write
-
 jobs:
-  setup:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout our repo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: true
-
-      - name: Clean current repo
-        run: |
-          echo "=== Before cleanup ==="
-          ls -la
-          shopt -s extglob dotglob
-          # Удаляем всё кроме .git и .github
-          find . -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.github' -exec rm -rf {} +
-          # Удаляем все workflows кроме текущего (setup.yml)
-          find .github/workflows -type f ! -name 'setup.yml' -delete 2>/dev/null || true
-          echo "=== After cleanup ==="
-          ls -la
-
       - name: Clone ByeDPIAndroid
         run: |
-          echo "=== Cloning ByeDPIAndroid ==="
           git clone --recursive https://github.com/dovecoteescapee/ByeDPIAndroid.git /tmp/byedpi
           cd /tmp/byedpi
           echo "Commit: $(git log -1 --oneline)"
-          echo ""
-          echo "Submodules:"
           git submodule status
+          echo ""
+          echo "=== Root files ==="
+          ls -la
+          echo ""
+          echo "=== app/src/main/java ==="
+          find app/src/main/java -maxdepth 3 -type d 2>/dev/null
 
-      - name: Copy ByeDPI files into our repo
+      - name: List all source files
         run: |
           cd /tmp/byedpi
-          shopt -s dotglob
-          for item in *; do
-            if [ "$item" != ".git" ]; then
-              cp -r "$item" "$GITHUB_WORKSPACE/"
-              echo "Copied: $item"
-            fi
-          done
-          # .gitignore
-          [ -f ".gitignore" ] && cp .gitignore "$GITHUB_WORKSPACE/" && echo "Copied: .gitignore"
-
-      - name: Expand submodules (copy contents, drop git refs)
-        run: |
-          cd /tmp/byedpi
-          if [ -f ".gitmodules" ]; then
-            git config --file .gitmodules --get-regexp path | awk '{print $2}' | while read sub; do
-              if [ -d "$sub" ] && [ "$(ls -A $sub 2>/dev/null)" ]; then
-                echo "Expanding submodule: $sub"
-                mkdir -p "$GITHUB_WORKSPACE/$sub"
-                cp -r "$sub/." "$GITHUB_WORKSPACE/$sub/"
-                rm -rf "$GITHUB_WORKSPACE/$sub/.git"
-              fi
-            done
-          fi
-          rm -f "$GITHUB_WORKSPACE/.gitmodules"
-          echo "Done expanding submodules"
-
-      - name: Remove all languages except English
-        run: |
-          cd "$GITHUB_WORKSPACE"
-          echo "=== Removing translation folders ==="
-          # Удаляем все values-* кроме values-night (тёмная тема) и базового values
-          find app/src/main/res -type d -name "values-*" 2>/dev/null | while read d; do
-            base=$(basename "$d")
-            # Оставляем только values-night (нужна для dark theme) и values-v* (system versioning)
-            if [[ "$base" == "values-night" || "$base" =~ ^values-v[0-9]+$ || "$base" == "values-notnight" ]]; then
-              echo "KEEP: $d"
-            else
-              echo "DELETE: $d"
-              rm -rf "$d"
-            fi
-          done
+          echo "=== All Kotlin files ==="
+          find . -name "*.kt" -type f 2>/dev/null
           echo ""
-          echo "=== Remaining values folders ==="
-          ls -la app/src/main/res/ | grep values
-
-      - name: Simplify settings (remove advanced preferences)
-        run: |
-          cd "$GITHUB_WORKSPACE"
-          echo "=== Finding preferences files ==="
-          find app/src/main/res/xml -type f 2>/dev/null
-
-          # Бэкап для отладки
-          if [ -d "app/src/main/res/xml" ]; then
-            echo "Original preferences files:"
-            ls -la app/src/main/res/xml/
-          fi
-
-      - name: Rename app to ShieldVPN
-        run: |
-          cd "$GITHUB_WORKSPACE"
-          echo "=== Renaming app ==="
-          find app/src/main/res/values -name "strings.xml" | while read f; do
-            sed -i 's|<string name="app_name">[^<]*</string>|<string name="app_name">ShieldVPN</string>|g' "$f"
-            echo "Patched: $f"
-            grep "app_name" "$f" || true
-          done
-
-      - name: Create build workflow
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/.github/workflows"
-          cat > "$GITHUB_WORKSPACE/.github/workflows/build.yml" << 'WORKFLOW_END'
-          name: Build_APK
-          on: [push, workflow_dispatch]
-
-          jobs:
-            build:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Checkout
-                  uses: actions/checkout@v4
-
-                - name: Set up JDK 17
-                  uses: actions/setup-java@v4
-                  with:
-                    java-version: '17'
-                    distribution: 'temurin'
-
-                - name: Setup Android SDK
-                  uses: android-actions/setup-android@v3
-
-                - name: Install NDK
-                  run: |
-                    NDK_VER="26.1.10909125"
-                    yes | sdkmanager --install "ndk;$NDK_VER" 2>&1 | tail -5
-                    echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
-                    echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
-                    ls $ANDROID_HOME/ndk/
-
-                - name: Setup Gradle
-                  uses: gradle/actions/setup-gradle@v3
-
-                - name: Build APK
-                  run: |
-                    chmod +x gradlew
-                    ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -200
-
-                - name: Find APK
-                  if: always()
-                  run: |
-                    find . -name "*.apk" -type f 2>/dev/null
-                    ls -laR app/build/outputs/ 2>/dev/null || echo "no outputs"
-
-                - name: Upload APK
-                  if: always()
-                  uses: actions/upload-artifact@v4
-                  with:
-                    name: ShieldVPN_APK
-                    path: |
-                      app/build/outputs/apk/**/*.apk
-                    if-no-files-found: warn
-                    retention-days: 30
-          WORKFLOW_END
-          echo "Build workflow created"
-
-      - name: Commit and push everything
-        run: |
-          cd "$GITHUB_WORKSPACE"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          echo "=== Status ==="
-          git status | head -20
-
-          git add -A
-          git commit -m "Setup ShieldVPN from ByeDPI base" || { echo "Nothing to commit"; exit 0; }
-
-          # Определим текущую ветку
-          BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          echo "Pushing to branch: $BRANCH"
-          git push origin "$BRANCH"
-
+          echo "=== All Java files ==="
+          find . -name "*.java" -type f 2>/dev/null
           echo ""
-          echo "=== SUCCESS ==="
-          echo "Now go to Actions and the build will start automatically"
+          echo "=== All res files ==="
+          find app/src/main/res -type f -name "*.xml" 2>/dev/null | head -50
+          echo ""
+          echo "=== Settings ==="
+          cat settings.gradle* 2>/dev/null || cat settings.gradle.kts 2>/dev/null
+          echo ""
+          echo "=== Build files ==="
+          ls *.gradle* 2>/dev/null
+          cat build.gradle* 2>/dev/null | head -30
+          echo ""
+          cat app/build.gradle* 2>/dev/null | head -30
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          NDK_VER="26.1.10909125"
+          yes | sdkmanager --install "ndk;$NDK_VER" 2>&1 | tail -5
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
+          ls $ANDROID_HOME/ndk/
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build APK
+        working-directory: /tmp/byedpi
+        run: |
+          chmod +x gradlew 2>/dev/null || true
+          echo "=== Building ==="
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -300
+
+      - name: Find APK
+        if: always()
+        run: |
+          echo "=== APK files ==="
+          find /tmp/byedpi -name "*.apk" -type f 2>/dev/null
+          echo ""
+          echo "=== Outputs ==="
+          ls -laR /tmp/byedpi/app/build/outputs/ 2>/dev/null || echo "no outputs"
+
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ByeDPI_APK
+          path: /tmp/byedpi/app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
+          retention-days: 30
