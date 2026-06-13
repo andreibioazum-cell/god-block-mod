@@ -1,4 +1,4 @@
-name: AntiDPI_VPN_Build
+name: ShieldVPN_v2
 on: [push, workflow_dispatch]
 
 jobs:
@@ -8,12 +8,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create VPN Project
+      - name: Create Project
         run: |
           mkdir -p app/src/main/java/com/antidpi/vpn
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/drawable
 
           cat > settings.gradle << 'ENDFILE'
           include ':app'
@@ -24,9 +23,7 @@ jobs:
               repositories { google(); mavenCentral() }
               dependencies { classpath 'com.android.tools.build:gradle:8.1.1' }
           }
-          allprojects {
-              repositories { google(); mavenCentral() }
-          }
+          allprojects { repositories { google(); mavenCentral() } }
           ENDFILE
 
           cat > app/build.gradle << 'ENDFILE'
@@ -36,51 +33,46 @@ jobs:
               compileSdk 34
               defaultConfig {
                   applicationId "com.antidpi.vpn"
-                  minSdk 26
+                  minSdk 29
                   targetSdk 34
-                  versionCode 1
-                  versionName "1.0-AntiDPI"
+                  versionCode 2
+                  versionName "2.0"
               }
-              buildTypes {
-                  debug {
-                      minifyEnabled false
-                  }
-              }
+              buildTypes { debug { minifyEnabled false } }
           }
           ENDFILE
 
-          # ===== COLORS =====
+          cat > gradle.properties << 'ENDFILE'
+          android.useAndroidX=true
+          org.gradle.jvmargs=-Xmx2048m
+          ENDFILE
+
           cat > app/src/main/res/values/colors.xml << 'ENDFILE'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <color name="bg_dark">#0A0A0F</color>
+              <color name="bg">#0A0A0F</color>
               <color name="accent">#00E5FF</color>
-              <color name="accent_dark">#007A8A</color>
-              <color name="text_primary">#EAEAEA</color>
-              <color name="text_secondary">#888888</color>
-              <color name="connected">#00FF88</color>
-              <color name="disconnected">#FF4444</color>
-              <color name="card_bg">#12121A</color>
+              <color name="green">#00FF88</color>
+              <color name="red">#FF4444</color>
+              <color name="gray">#888888</color>
+              <color name="text">#EAEAEA</color>
           </resources>
           ENDFILE
 
-          # ===== STRINGS =====
           cat > app/src/main/res/values/strings.xml << 'ENDFILE'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <string name="app_name">ShieldVPN</string>
-              <string name="vpn_service_name">ShieldVPN Secure Tunnel</string>
           </resources>
           ENDFILE
 
-          # ===== LAYOUT =====
           cat > app/src/main/res/layout/activity_main.xml << 'ENDFILE'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
               android:layout_height="match_parent"
               android:orientation="vertical"
-              android:background="@color/bg_dark"
+              android:background="@color/bg"
               android:padding="20dp"
               android:gravity="center_horizontal">
 
@@ -89,114 +81,61 @@ jobs:
                   android:layout_height="wrap_content"
                   android:text="🛡️ ShieldVPN"
                   android:textColor="@color/accent"
-                  android:textSize="28sp"
+                  android:textSize="32sp"
                   android:textStyle="bold"
-                  android:layout_marginTop="30dp"/>
+                  android:layout_marginTop="40dp"/>
 
               <TextView
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
-                  android:text="Anti-DPI VPN Client"
-                  android:textColor="@color/text_secondary"
-                  android:textSize="14sp"
-                  android:layout_marginTop="5dp"/>
+                  android:text="Anti-DPI TLS Fragmenter"
+                  android:textColor="@color/gray"
+                  android:textSize="13sp"
+                  android:layout_marginTop="4dp"/>
 
               <TextView
                   android:id="@+id/statusText"
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
-                  android:text="● Disconnected"
-                  android:textColor="@color/disconnected"
-                  android:textSize="16sp"
+                  android:text="● OFF"
+                  android:textColor="@color/red"
+                  android:textSize="18sp"
                   android:layout_marginTop="40dp"/>
 
               <Button
                   android:id="@+id/btnConnect"
-                  android:layout_width="200dp"
-                  android:layout_height="200dp"
-                  android:text="CONNECT"
-                  android:textSize="18sp"
+                  android:layout_width="220dp"
+                  android:layout_height="220dp"
+                  android:text="START"
+                  android:textSize="22sp"
+                  android:textStyle="bold"
                   android:textColor="#FFF"
-                  android:backgroundTint="@color/accent_dark"
+                  android:backgroundTint="@color/accent"
                   android:layout_marginTop="30dp"/>
 
-              <LinearLayout
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:orientation="vertical"
-                  android:background="@color/card_bg"
-                  android:padding="15dp"
-                  android:layout_marginTop="30dp">
-
-                  <TextView
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="Server Settings"
-                      android:textColor="@color/accent"
-                      android:textSize="14sp"
-                      android:textStyle="bold"/>
-
-                  <EditText
-                      android:id="@+id/serverAddress"
-                      android:layout_width="match_parent"
-                      android:layout_height="wrap_content"
-                      android:hint="Server IP / Domain"
-                      android:text="127.0.0.1"
-                      android:textColor="@color/text_primary"
-                      android:textColorHint="@color/text_secondary"
-                      android:background="#1A1A25"
-                      android:padding="10dp"
-                      android:layout_marginTop="8dp"
-                      android:textSize="13sp"/>
-
-                  <EditText
-                      android:id="@+id/serverPort"
-                      android:layout_width="match_parent"
-                      android:layout_height="wrap_content"
-                      android:hint="Port"
-                      android:text="1080"
-                      android:textColor="@color/text_primary"
-                      android:textColorHint="@color/text_secondary"
-                      android:background="#1A1A25"
-                      android:padding="10dp"
-                      android:layout_marginTop="5dp"
-                      android:inputType="number"
-                      android:textSize="13sp"/>
-
-                  <CheckBox
-                      android:id="@+id/enableFragment"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="TLS Fragmentation (Anti-DPI)"
-                      android:textColor="@color/text_primary"
-                      android:checked="true"
-                      android:layout_marginTop="5dp"
-                      android:buttonTint="@color/accent"/>
-
-              </LinearLayout>
-
               <ScrollView
+                  android:id="@+id/logScroll"
                   android:layout_width="match_parent"
                   android:layout_height="0dp"
                   android:layout_weight="1"
-                  android:layout_marginTop="10dp">
+                  android:background="#12121A"
+                  android:padding="10dp"
+                  android:layout_marginTop="30dp">
                   <TextView
                       android:id="@+id/logView"
                       android:layout_width="match_parent"
                       android:layout_height="wrap_content"
-                      android:textColor="@color/text_secondary"
+                      android:textColor="@color/text"
                       android:textSize="10sp"
                       android:fontFamily="monospace"
-                      android:text="[LOG] ShieldVPN v1.0 ready\n"/>
+                      android:text=""/>
               </ScrollView>
           </LinearLayout>
           ENDFILE
 
-          # ===== MANIFEST =====
           cat > app/src/main/AndroidManifest.xml << 'ENDFILE'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
               <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
@@ -224,285 +163,236 @@ jobs:
                           <action android:name="android.net.VpnService"/>
                       </intent-filter>
                   </service>
-
               </application>
           </manifest>
           ENDFILE
 
-          # ===== TLS FRAGMENTER (Anti-DPI Core) =====
-          cat > app/src/main/java/com/antidpi/vpn/TlsFragmenter.java << 'ENDFILE'
+          # ===== HTTP PROXY с TLS фрагментацией =====
+          cat > app/src/main/java/com/antidpi/vpn/HttpProxy.java << 'ENDFILE'
           package com.antidpi.vpn;
 
+          import android.util.Log;
           import java.io.*;
-          import java.net.Socket;
+          import java.net.*;
           import java.util.Random;
 
           /**
-           * TLS Fragmentation Engine
-           * Разбивает TLS ClientHello на мелкие фрагменты
-           * чтобы DPI не мог прочитать SNI из одного пакета.
-           *
-           * Это основная техника обхода российского DPI (ТСПУ).
+           * HTTP CONNECT proxy сервер.
+           * Принимает HTTPS-трафик от Android system proxy,
+           * подключается к целевому серверу,
+           * фрагментирует TLS ClientHello для обхода DPI.
            */
-          public class TlsFragmenter {
+          public class HttpProxy {
 
-              private static final Random random = new Random();
+              private static final String TAG = "ShieldProxy";
+              private static final int BUF_SIZE = 16384;
+              private static final Random rnd = new Random();
 
-              // Размер фрагмента: 10-50 байт (случайный)
-              private static final int MIN_FRAGMENT = 10;
-              private static final int MAX_FRAGMENT = 50;
+              // Параметры фрагментации
+              private static final int FRAG_MIN = 1;
+              private static final int FRAG_MAX = 5;
+              private static final int SLEEP_MIN = 5;
+              private static final int SLEEP_MAX = 30;
 
-              // Пауза между фрагментами: 10-50 мс (случайная)
-              private static final int MIN_SLEEP_MS = 10;
-              private static final int MAX_SLEEP_MS = 50;
+              private final int port;
+              private ServerSocket server;
+              private volatile boolean running = false;
 
-              /**
-               * Определяет, является ли пакет TLS ClientHello
-               */
-              public static boolean isTlsClientHello(byte[] data) {
-                  if (data == null || data.length < 6) return false;
-                  // TLS record: ContentType=22 (Handshake), Version=0x0301-0x0303
-                  // Handshake type: ClientHello=1
-                  return data[0] == 0x16 &&
-                         data[1] == 0x03 &&
-                         (data[2] >= 0x01 && data[2] <= 0x03) &&
-                         data[5] == 0x01;
+              public interface Logger { void log(String msg); }
+              private Logger logger;
+
+              public HttpProxy(int port, Logger logger) {
+                  this.port = port;
+                  this.logger = logger;
+              }
+
+              public void start() throws IOException {
+                  server = new ServerSocket(port, 256, InetAddress.getByName("127.0.0.1"));
+                  running = true;
+                  logger.log("Proxy listening on 127.0.0.1:" + port);
+
+                  new Thread(() -> {
+                      while (running) {
+                          try {
+                              Socket client = server.accept();
+                              client.setTcpNoDelay(true);
+                              new Thread(() -> handle(client)).start();
+                          } catch (IOException e) {
+                              if (running) Log.e(TAG, "Accept: " + e.getMessage());
+                          }
+                      }
+                  }).start();
+              }
+
+              public void stop() {
+                  running = false;
+                  try { if (server != null) server.close(); } catch (IOException ignored) {}
               }
 
               /**
-               * Отправляет данные фрагментированно
-               * Если это TLS ClientHello — разбивает на мелкие куски с паузами
-               * Иначе — отправляет как есть
+               * Обрабатываем HTTP CONNECT или обычный HTTP-запрос
                */
-              public static void sendFragmented(OutputStream out, byte[] data, boolean enableFragment) throws IOException {
-                  if (!enableFragment || !isTlsClientHello(data)) {
-                      out.write(data);
-                      out.flush();
-                      return;
-                  }
+              private void handle(Socket client) {
+                  Socket remote = null;
+                  try {
+                      InputStream cIn = client.getInputStream();
+                      OutputStream cOut = client.getOutputStream();
 
-                  // Фрагментируем TLS ClientHello
-                  int offset = 0;
-                  int fragmentIndex = 0;
+                      // Читаем первую строку HTTP-запроса
+                      ByteArrayOutputStream headerBuf = new ByteArrayOutputStream();
+                      int b;
+                      int crlfCount = 0;
+                      while ((b = cIn.read()) != -1) {
+                          headerBuf.write(b);
+                          if (b == '\r' || b == '\n') {
+                              crlfCount++;
+                              if (crlfCount == 4) break; // \r\n\r\n
+                          } else {
+                              crlfCount = 0;
+                          }
+                          if (headerBuf.size() > 8192) break;
+                      }
 
-                  while (offset < data.length) {
-                      int fragSize = MIN_FRAGMENT + random.nextInt(MAX_FRAGMENT - MIN_FRAGMENT + 1);
-                      fragSize = Math.min(fragSize, data.length - offset);
+                      String header = headerBuf.toString("ISO-8859-1");
+                      String[] lines = header.split("\r\n");
+                      if (lines.length == 0) { client.close(); return; }
 
-                      out.write(data, offset, fragSize);
-                      out.flush();
+                      String[] reqLine = lines[0].split(" ");
+                      if (reqLine.length < 2) { client.close(); return; }
 
-                      offset += fragSize;
-                      fragmentIndex++;
+                      String method = reqLine[0];
+                      String target = reqLine[1];
 
-                      // Пауза между фрагментами (кроме последнего)
-                      if (offset < data.length) {
+                      String host;
+                      int port;
+                      boolean isConnect = "CONNECT".equalsIgnoreCase(method);
+
+                      if (isConnect) {
+                          // CONNECT host:port HTTP/1.1
+                          String[] hp = target.split(":");
+                          host = hp[0];
+                          port = hp.length > 1 ? Integer.parseInt(hp[1]) : 443;
+                      } else {
+                          // GET http://host/path HTTP/1.1
                           try {
-                              int sleepMs = MIN_SLEEP_MS + random.nextInt(MAX_SLEEP_MS - MIN_SLEEP_MS + 1);
-                              Thread.sleep(sleepMs);
+                              URL url = new URL(target);
+                              host = url.getHost();
+                              port = url.getPort() == -1 ? 80 : url.getPort();
+                          } catch (Exception e) {
+                              client.close(); return;
+                          }
+                      }
+
+                      // Подключаемся к целевому серверу
+                      remote = new Socket();
+                      remote.setTcpNoDelay(true);
+                      remote.connect(new InetSocketAddress(host, port), 10000);
+
+                      if (isConnect) {
+                          // Отвечаем клиенту "OK"
+                          cOut.write("HTTP/1.1 200 Connection Established\r\n\r\n".getBytes());
+                          cOut.flush();
+                      } else {
+                          // Отправляем исходный HTTP-запрос на сервер
+                          remote.getOutputStream().write(headerBuf.toByteArray());
+                          remote.getOutputStream().flush();
+                      }
+
+                      logger.log("→ " + host + ":" + port + (port == 443 ? " [FRAG]" : ""));
+
+                      // Двунаправленное проксирование
+                      final Socket finalRemote = remote;
+                      Thread up = new Thread(() -> pipeWithFragment(client, finalRemote, port == 443));
+                      Thread down = new Thread(() -> pipe(finalRemote, client));
+                      up.start();
+                      down.start();
+                      up.join();
+                      down.join();
+
+                  } catch (Exception e) {
+                      Log.d(TAG, "Handle: " + e.getMessage());
+                  } finally {
+                      try { client.close(); } catch (Exception ignored) {}
+                      try { if (remote != null) remote.close(); } catch (Exception ignored) {}
+                  }
+              }
+
+              /**
+               * Простое проксирование без изменений
+               */
+              private void pipe(Socket from, Socket to) {
+                  try {
+                      InputStream in = from.getInputStream();
+                      OutputStream out = to.getOutputStream();
+                      byte[] buf = new byte[BUF_SIZE];
+                      int len;
+                      while ((len = in.read(buf)) != -1) {
+                          out.write(buf, 0, len);
+                          out.flush();
+                      }
+                  } catch (IOException ignored) {
+                  } finally {
+                      try { from.close(); } catch (IOException ignored) {}
+                      try { to.close(); } catch (IOException ignored) {}
+                  }
+              }
+
+              /**
+               * Проксирование с фрагментацией TLS ClientHello (первого пакета на 443 порту)
+               */
+              private void pipeWithFragment(Socket from, Socket to, boolean fragmentFirst) {
+                  try {
+                      InputStream in = from.getInputStream();
+                      OutputStream out = to.getOutputStream();
+                      byte[] buf = new byte[BUF_SIZE];
+                      boolean first = fragmentFirst;
+                      int len;
+
+                      while ((len = in.read(buf)) != -1) {
+                          if (first && isTlsClientHello(buf, len)) {
+                              first = false;
+                              sendFragmented(out, buf, len);
+                          } else {
+                              first = false;
+                              out.write(buf, 0, len);
+                              out.flush();
+                          }
+                      }
+                  } catch (IOException ignored) {
+                  } finally {
+                      try { from.close(); } catch (IOException ignored) {}
+                      try { to.close(); } catch (IOException ignored) {}
+                  }
+              }
+
+              private boolean isTlsClientHello(byte[] data, int len) {
+                  if (len < 6) return false;
+                  return data[0] == 0x16 && data[1] == 0x03 && data[5] == 0x01;
+              }
+
+              /**
+               * Разбиваем TLS ClientHello на мелкие фрагменты
+               */
+              private void sendFragmented(OutputStream out, byte[] data, int len) throws IOException {
+                  int offset = 0;
+                  int fragments = 0;
+                  while (offset < len) {
+                      int sz = FRAG_MIN + rnd.nextInt(FRAG_MAX - FRAG_MIN + 1);
+                      sz = Math.min(sz, len - offset);
+                      out.write(data, offset, sz);
+                      out.flush();
+                      offset += sz;
+                      fragments++;
+                      if (offset < len) {
+                          try {
+                              Thread.sleep(SLEEP_MIN + rnd.nextInt(SLEEP_MAX - SLEEP_MIN + 1));
                           } catch (InterruptedException e) {
                               Thread.currentThread().interrupt();
                               break;
                           }
                       }
                   }
-                  // Log fragment count for debugging
-                  android.util.Log.d("TlsFragment", "ClientHello split into " + fragmentIndex + " fragments");
-              }
-
-              /**
-               * Создаёт проксированное соединение с фрагментацией
-               */
-              public static void proxyWithFragment(
-                  Socket clientSocket,
-                  String remoteHost, int remotePort,
-                  boolean enableFragment
-              ) {
-                  try {
-                      Socket remoteSocket = new Socket(remoteHost, remotePort);
-                      remoteSocket.setTcpNoDelay(true); // Важно! Отключаем Nagle для точной фрагментации
-
-                      // Client -> Remote (с фрагментацией)
-                      Thread upstream = new Thread(() -> {
-                          try {
-                              InputStream in = clientSocket.getInputStream();
-                              OutputStream out = remoteSocket.getOutputStream();
-
-                              byte[] buf = new byte[16384];
-                              boolean firstPacket = true;
-                              int len;
-
-                              while ((len = in.read(buf)) != -1) {
-                                  byte[] data = new byte[len];
-                                  System.arraycopy(buf, 0, data, 0, len);
-
-                                  if (firstPacket) {
-                                      // Первый пакет — скорее всего TLS ClientHello
-                                      sendFragmented(out, data, enableFragment);
-                                      firstPacket = false;
-                                  } else {
-                                      out.write(data);
-                                      out.flush();
-                                  }
-                              }
-                          } catch (IOException ignored) {
-                          } finally {
-                              try { remoteSocket.close(); } catch (IOException ignored) {}
-                              try { clientSocket.close(); } catch (IOException ignored) {}
-                          }
-                      });
-
-                      // Remote -> Client (без изменений)
-                      Thread downstream = new Thread(() -> {
-                          try {
-                              InputStream in = remoteSocket.getInputStream();
-                              OutputStream out = clientSocket.getOutputStream();
-
-                              byte[] buf = new byte[16384];
-                              int len;
-                              while ((len = in.read(buf)) != -1) {
-                                  out.write(buf, 0, len);
-                                  out.flush();
-                              }
-                          } catch (IOException ignored) {
-                          } finally {
-                              try { remoteSocket.close(); } catch (IOException ignored) {}
-                              try { clientSocket.close(); } catch (IOException ignored) {}
-                          }
-                      });
-
-                      upstream.start();
-                      downstream.start();
-
-                  } catch (IOException e) {
-                      android.util.Log.e("TlsFragment", "Proxy error: " + e.getMessage());
-                  }
-              }
-          }
-          ENDFILE
-
-          # ===== LOCAL PROXY SERVER =====
-          cat > app/src/main/java/com/antidpi/vpn/LocalProxy.java << 'ENDFILE'
-          package com.antidpi.vpn;
-
-          import android.util.Log;
-          import java.io.*;
-          import java.net.*;
-          import java.nio.charset.StandardCharsets;
-
-          /**
-           * Локальный SOCKS5 прокси-сервер с TLS фрагментацией.
-           * Принимает соединения от VPN-туннеля и проксирует их
-           * к целевым серверам, фрагментируя TLS ClientHello.
-           */
-          public class LocalProxy implements Runnable {
-
-              private static final String TAG = "LocalProxy";
-              private final int localPort;
-              private final boolean enableFragment;
-              private ServerSocket serverSocket;
-              private volatile boolean running = false;
-
-              public LocalProxy(int localPort, boolean enableFragment) {
-                  this.localPort = localPort;
-                  this.enableFragment = enableFragment;
-              }
-
-              public void start() {
-                  running = true;
-                  new Thread(this).start();
-              }
-
-              public void stop() {
-                  running = false;
-                  try {
-                      if (serverSocket != null) serverSocket.close();
-                  } catch (IOException ignored) {}
-              }
-
-              @Override
-              public void run() {
-                  try {
-                      serverSocket = new ServerSocket(localPort, 128, InetAddress.getByName("127.0.0.1"));
-                      Log.i(TAG, "SOCKS5 proxy listening on 127.0.0.1:" + localPort);
-
-                      while (running) {
-                          try {
-                              Socket client = serverSocket.accept();
-                              client.setTcpNoDelay(true);
-                              new Thread(() -> handleSocks5(client)).start();
-                          } catch (IOException e) {
-                              if (running) Log.e(TAG, "Accept error: " + e.getMessage());
-                          }
-                      }
-                  } catch (IOException e) {
-                      Log.e(TAG, "Server error: " + e.getMessage());
-                  }
-              }
-
-              /**
-               * SOCKS5 handshake и проксирование
-               * RFC 1928
-               */
-              private void handleSocks5(Socket client) {
-                  try {
-                      InputStream in = client.getInputStream();
-                      OutputStream out = client.getOutputStream();
-
-                      // 1. Greeting
-                      int ver = in.read();
-                      if (ver != 5) { client.close(); return; }
-                      int nMethods = in.read();
-                      byte[] methods = new byte[nMethods];
-                      in.read(methods);
-
-                      // No auth
-                      out.write(new byte[]{0x05, 0x00});
-                      out.flush();
-
-                      // 2. Request
-                      byte[] header = new byte[4];
-                      in.read(header);
-                      if (header[0] != 0x05 || header[1] != 0x01) { // CONNECT only
-                          client.close(); return;
-                      }
-
-                      String targetHost;
-                      int addrType = header[3];
-
-                      if (addrType == 0x01) { // IPv4
-                          byte[] addr = new byte[4];
-                          in.read(addr);
-                          targetHost = InetAddress.getByAddress(addr).getHostAddress();
-                      } else if (addrType == 0x03) { // Domain
-                          int domainLen = in.read();
-                          byte[] domain = new byte[domainLen];
-                          in.read(domain);
-                          targetHost = new String(domain, StandardCharsets.UTF_8);
-                      } else if (addrType == 0x04) { // IPv6
-                          byte[] addr = new byte[16];
-                          in.read(addr);
-                          targetHost = InetAddress.getByAddress(addr).getHostAddress();
-                      } else {
-                          client.close(); return;
-                      }
-
-                      int targetPort = (in.read() << 8) | in.read();
-
-                      // 3. Reply: success
-                      out.write(new byte[]{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
-                      out.flush();
-
-                      Log.d(TAG, "CONNECT " + targetHost + ":" + targetPort +
-                            (enableFragment ? " [FRAG]" : ""));
-
-                      // 4. Proxy with TLS fragmentation
-                      TlsFragmenter.proxyWithFragment(client, targetHost, targetPort, enableFragment);
-
-                  } catch (IOException e) {
-                      Log.e(TAG, "SOCKS5 error: " + e.getMessage());
-                      try { client.close(); } catch (IOException ignored) {}
-                  }
+                  Log.d(TAG, "TLS split: " + fragments + " parts");
               }
           }
           ENDFILE
@@ -511,33 +401,43 @@ jobs:
           cat > app/src/main/java/com/antidpi/vpn/ShieldVpnService.java << 'ENDFILE'
           package com.antidpi.vpn;
 
-          import android.app.Notification;
-          import android.app.NotificationChannel;
-          import android.app.NotificationManager;
-          import android.app.PendingIntent;
+          import android.app.*;
           import android.content.Intent;
+          import android.net.ProxyInfo;
           import android.net.VpnService;
           import android.os.Build;
           import android.os.ParcelFileDescriptor;
           import android.util.Log;
+          import java.util.ArrayList;
+          import java.util.List;
 
-          /**
-           * VPN Service с анти-DPI
-           * Создаёт TUN-интерфейс и направляет трафик через локальный SOCKS5 прокси
-           * с TLS фрагментацией.
-           */
           public class ShieldVpnService extends VpnService {
 
               private static final String TAG = "ShieldVPN";
-              private static final String CHANNEL_ID = "shield_vpn_channel";
-              private static final int NOTIFICATION_ID = 1;
-              private static final int LOCAL_PROXY_PORT = 10809;
-
-              private ParcelFileDescriptor tunFd;
-              private LocalProxy localProxy;
+              private static final String CHANNEL_ID = "shield_vpn";
+              private static final int NOTIFICATION_ID = 7;
+              private static final int PROXY_PORT = 10809;
 
               public static volatile boolean isRunning = false;
-              public static volatile String statusMessage = "";
+              private static final List<String> logs = new ArrayList<>();
+              public static volatile LogListener listener;
+
+              public interface LogListener { void onLog(String msg); }
+
+              private ParcelFileDescriptor tunFd;
+              private HttpProxy proxy;
+
+              public static synchronized void addLog(String msg) {
+                  String time = new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date());
+                  String line = "[" + time + "] " + msg;
+                  logs.add(line);
+                  if (logs.size() > 200) logs.remove(0);
+                  if (listener != null) {
+                      try { listener.onLog(line); } catch (Exception ignored) {}
+                  }
+              }
+
+              public static synchronized List<String> getLogs() { return new ArrayList<>(logs); }
 
               @Override
               public int onStartCommand(Intent intent, int flags, int startId) {
@@ -545,116 +445,81 @@ jobs:
                       stopVpn();
                       return START_NOT_STICKY;
                   }
-
-                  boolean enableFragment = true;
-                  if (intent != null) {
-                      enableFragment = intent.getBooleanExtra("enableFragment", true);
-                  }
-
-                  startForegroundNotification();
-                  startVpn(enableFragment);
+                  showNotification();
+                  startVpn();
                   return START_STICKY;
               }
 
-              private void startVpn(boolean enableFragment) {
+              private void startVpn() {
                   try {
-                      // 1. Запускаем локальный SOCKS5 прокси с фрагментацией
-                      localProxy = new LocalProxy(LOCAL_PROXY_PORT, enableFragment);
-                      localProxy.start();
-                      Log.i(TAG, "Local proxy started on port " + LOCAL_PROXY_PORT);
+                      addLog("Starting local proxy...");
+                      proxy = new HttpProxy(PROXY_PORT, ShieldVpnService::addLog);
+                      proxy.start();
 
-                      // 2. Создаём TUN-интерфейс
-                      Builder builder = new Builder();
-                      builder.setSession("ShieldVPN")
-                             .setMtu(1500)
-                             .addAddress("10.233.7.1", 30)
-                             .addRoute("0.0.0.0", 0)
-                             .addDnsServer("1.1.1.1")
-                             .addDnsServer("8.8.8.8");
+                      addLog("Setting up VPN with system HTTP proxy...");
+                      Builder b = new Builder();
+                      b.setSession("ShieldVPN")
+                       .setMtu(1500)
+                       .addAddress("10.233.7.1", 30)
+                       .addRoute("10.233.7.2", 32)
+                       .setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", PROXY_PORT));
 
-                      // Не проксируем себя (избегаем loop)
-                      try {
-                          builder.addDisallowedApplication(getPackageName());
-                      } catch (Exception ignored) {}
+                      try { b.addDisallowedApplication(getPackageName()); } catch (Exception ignored) {}
 
-                      tunFd = builder.establish();
-
+                      tunFd = b.establish();
                       if (tunFd == null) {
-                          Log.e(TAG, "Failed to establish VPN tunnel");
-                          statusMessage = "Error: tunnel failed";
-                          stopSelf();
+                          addLog("[ERROR] Failed to establish VPN");
+                          stopVpn();
                           return;
                       }
 
                       isRunning = true;
-                      statusMessage = "Connected (Fragment: " + (enableFragment ? "ON" : "OFF") + ")";
-                      Log.i(TAG, "VPN tunnel established. Anti-DPI: " + enableFragment);
+                      addLog("✓ VPN active. Anti-DPI fragmentation ON.");
+                      addLog("All HTTPS traffic protected.");
 
                   } catch (Exception e) {
-                      Log.e(TAG, "VPN start error: " + e.getMessage());
-                      statusMessage = "Error: " + e.getMessage();
+                      addLog("[ERROR] " + e.getMessage());
+                      Log.e(TAG, "Start", e);
                       stopVpn();
                   }
               }
 
               private void stopVpn() {
                   isRunning = false;
-                  statusMessage = "Disconnected";
-
-                  if (localProxy != null) {
-                      localProxy.stop();
-                      localProxy = null;
-                  }
-
+                  if (proxy != null) { proxy.stop(); proxy = null; }
                   if (tunFd != null) {
                       try { tunFd.close(); } catch (Exception ignored) {}
                       tunFd = null;
                   }
-
+                  addLog("VPN stopped");
                   stopForeground(true);
                   stopSelf();
               }
 
-              private void startForegroundNotification() {
+              private void showNotification() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      NotificationChannel channel = new NotificationChannel(
-                          CHANNEL_ID, "ShieldVPN Service",
-                          NotificationManager.IMPORTANCE_LOW
-                      );
-                      channel.setDescription("VPN tunnel is active");
+                      NotificationChannel ch = new NotificationChannel(
+                          CHANNEL_ID, "ShieldVPN", NotificationManager.IMPORTANCE_LOW);
                       NotificationManager nm = getSystemService(NotificationManager.class);
-                      if (nm != null) nm.createNotificationChannel(channel);
+                      if (nm != null) nm.createNotificationChannel(ch);
                   }
+                  Intent stop = new Intent(this, ShieldVpnService.class);
+                  stop.setAction("STOP");
+                  PendingIntent pi = PendingIntent.getService(this, 0, stop,
+                      PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
-                  Intent stopIntent = new Intent(this, ShieldVpnService.class);
-                  stopIntent.setAction("STOP");
-                  PendingIntent stopPending = PendingIntent.getService(
-                      this, 0, stopIntent,
-                      PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-                  );
-
-                  Notification notification = new Notification.Builder(this, CHANNEL_ID)
-                      .setContentTitle("ShieldVPN Active")
+                  Notification n = new Notification.Builder(this, CHANNEL_ID)
+                      .setContentTitle("ShieldVPN active")
                       .setContentText("Anti-DPI protection enabled")
                       .setSmallIcon(android.R.drawable.ic_menu_compass)
-                      .addAction(android.R.drawable.ic_delete, "Stop", stopPending)
+                      .addAction(android.R.drawable.ic_delete, "Stop", pi)
                       .setOngoing(true)
                       .build();
-
-                  startForeground(NOTIFICATION_ID, notification);
+                  startForeground(NOTIFICATION_ID, n);
               }
 
-              @Override
-              public void onDestroy() {
-                  stopVpn();
-                  super.onDestroy();
-              }
-
-              @Override
-              public void onRevoke() {
-                  stopVpn();
-                  super.onRevoke();
-              }
+              @Override public void onDestroy() { stopVpn(); super.onDestroy(); }
+              @Override public void onRevoke() { stopVpn(); super.onRevoke(); }
           }
           ENDFILE
 
@@ -669,13 +534,13 @@ jobs:
           import android.os.Handler;
           import android.os.Looper;
           import android.widget.*;
+          import android.widget.ScrollView;
 
           public class MainActivity extends Activity {
 
-              private static final int VPN_REQUEST_CODE = 100;
+              private static final int VPN_REQ = 100;
               private TextView statusText, logView;
-              private EditText serverAddress, serverPort;
-              private CheckBox enableFragment;
+              private ScrollView logScroll;
               private Button btnConnect;
               private boolean connected = false;
               private Handler handler = new Handler(Looper.getMainLooper());
@@ -687,109 +552,82 @@ jobs:
 
                   statusText = findViewById(R.id.statusText);
                   logView = findViewById(R.id.logView);
-                  serverAddress = findViewById(R.id.serverAddress);
-                  serverPort = findViewById(R.id.serverPort);
-                  enableFragment = findViewById(R.id.enableFragment);
+                  logScroll = findViewById(R.id.logScroll);
                   btnConnect = findViewById(R.id.btnConnect);
 
                   btnConnect.setOnClickListener(v -> {
-                      if (!connected) {
-                          startVpn();
-                      } else {
-                          stopVpn();
-                      }
+                      if (!ShieldVpnService.isRunning) startVpn();
+                      else stopVpn();
                   });
 
-                  // Обновляем статус каждую секунду
+                  ShieldVpnService.listener = msg -> handler.post(() -> {
+                      logView.append(msg + "\n");
+                      logScroll.post(() -> logScroll.fullScroll(ScrollView.FOCUS_DOWN));
+                  });
+
+                  // Загружаем существующие логи
+                  for (String s : ShieldVpnService.getLogs()) {
+                      logView.append(s + "\n");
+                  }
+
+                  // Обновляем UI каждую секунду
                   handler.postDelayed(new Runnable() {
-                      @Override
-                      public void run() {
-                          updateStatus();
+                      @Override public void run() {
+                          updateUi();
                           handler.postDelayed(this, 1000);
                       }
-                  }, 1000);
+                  }, 500);
               }
 
               private void startVpn() {
-                  appendLog("Preparing VPN tunnel...");
-                  appendLog("Server: " + serverAddress.getText().toString() + ":" + serverPort.getText().toString());
-                  appendLog("TLS Fragment: " + (enableFragment.isChecked() ? "ENABLED" : "DISABLED"));
-
-                  Intent prepare = VpnService.prepare(this);
-                  if (prepare != null) {
-                      startActivityForResult(prepare, VPN_REQUEST_CODE);
-                  } else {
-                      launchVpnService();
-                  }
+                  logView.append("[UI] Requesting VPN permission...\n");
+                  Intent prep = VpnService.prepare(this);
+                  if (prep != null) startActivityForResult(prep, VPN_REQ);
+                  else launch();
               }
 
               private void stopVpn() {
-                  appendLog("Stopping VPN...");
-                  Intent intent = new Intent(this, ShieldVpnService.class);
-                  intent.setAction("STOP");
-                  startService(intent);
-                  connected = false;
-                  btnConnect.setText("CONNECT");
-                  btnConnect.setBackgroundTintList(getColorStateList(R.color.accent_dark));
-                  statusText.setText("● Disconnected");
-                  statusText.setTextColor(getColor(R.color.disconnected));
+                  Intent i = new Intent(this, ShieldVpnService.class);
+                  i.setAction("STOP");
+                  startService(i);
               }
 
               @Override
-              protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-                  super.onActivityResult(requestCode, resultCode, data);
-                  if (requestCode == VPN_REQUEST_CODE) {
-                      if (resultCode == RESULT_OK) {
-                          launchVpnService();
-                      } else {
-                          appendLog("[ERROR] VPN permission denied by user");
-                      }
-                  }
+              protected void onActivityResult(int rc, int res, Intent data) {
+                  super.onActivityResult(rc, res, data);
+                  if (rc == VPN_REQ && res == RESULT_OK) launch();
+                  else if (rc == VPN_REQ) logView.append("[UI] Permission denied\n");
               }
 
-              private void launchVpnService() {
-                  Intent intent = new Intent(this, ShieldVpnService.class);
-                  intent.putExtra("enableFragment", enableFragment.isChecked());
-                  intent.putExtra("serverAddress", serverAddress.getText().toString());
-                  intent.putExtra("serverPort", Integer.parseInt(serverPort.getText().toString()));
-                  startForegroundService(intent);
-
-                  connected = true;
-                  btnConnect.setText("DISCONNECT");
-                  btnConnect.setBackgroundTintList(getColorStateList(R.color.disconnected));
-                  statusText.setText("● Connected");
-                  statusText.setTextColor(getColor(R.color.connected));
-                  appendLog("✅ VPN tunnel established!");
-                  appendLog("Anti-DPI fragmentation: " + (enableFragment.isChecked() ? "ACTIVE" : "OFF"));
+              private void launch() {
+                  Intent i = new Intent(this, ShieldVpnService.class);
+                  startForegroundService(i);
               }
 
-              private void updateStatus() {
-                  if (ShieldVpnService.isRunning) {
-                      if (!connected) {
-                          connected = true;
-                          btnConnect.setText("DISCONNECT");
-                          statusText.setText("● " + ShieldVpnService.statusMessage);
-                          statusText.setTextColor(getColor(R.color.connected));
-                      }
-                  } else {
+              private void updateUi() {
+                  boolean nowRunning = ShieldVpnService.isRunning;
+                  if (nowRunning != connected) {
+                      connected = nowRunning;
                       if (connected) {
-                          connected = false;
-                          btnConnect.setText("CONNECT");
-                          statusText.setText("● Disconnected");
-                          statusText.setTextColor(getColor(R.color.disconnected));
+                          statusText.setText("● ON");
+                          statusText.setTextColor(getColor(R.color.green));
+                          btnConnect.setText("STOP");
+                          btnConnect.setBackgroundTintList(getColorStateList(R.color.red));
+                      } else {
+                          statusText.setText("● OFF");
+                          statusText.setTextColor(getColor(R.color.red));
+                          btnConnect.setText("START");
+                          btnConnect.setBackgroundTintList(getColorStateList(R.color.accent));
                       }
                   }
               }
 
-              private void appendLog(String msg) {
-                  logView.append("[" + new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date()) + "] " + msg + "\n");
+              @Override
+              protected void onDestroy() {
+                  ShieldVpnService.listener = null;
+                  super.onDestroy();
               }
           }
-          ENDFILE
-
-          cat > gradle.properties << 'ENDFILE'
-          android.useAndroidX=true
-          org.gradle.jvmargs=-Xmx2048m
           ENDFILE
 
       - name: Set up JDK 17
@@ -809,5 +647,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ShieldVPN_AntiDPI_v1
+          name: ShieldVPN_v2
           path: app/build/outputs/apk/debug/app-debug.apk
