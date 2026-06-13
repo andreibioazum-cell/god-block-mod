@@ -1,174 +1,67 @@
-name: Clone_ByeDPI_To_Repo
-on: [workflow_dispatch]
-
-# Даём workflow права на запись в репозиторий
-permissions:
-  contents: write
+name: Build_ByeDPI_APK
+on: [push, workflow_dispatch]
 
 jobs:
-  clone:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout our repo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Clean current repo (keep only .git and this workflow)
+      - name: Clone ByeDPIAndroid
         run: |
-          echo "=== Before cleanup ==="
-          ls -la
-
-          # Сохраняем .git (история) и текущий workflow на всякий случай
-          shopt -s extglob dotglob
-          # Удаляем всё кроме .git и .github
-          find . -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.github' -exec rm -rf {} +
-          # Удаляем все workflows кроме текущего
-          find .github/workflows -type f ! -name 'clone_byedpi.yml' -delete 2>/dev/null || true
-
-          echo "=== After cleanup ==="
-          ls -la
-
-      - name: Clone ByeDPIAndroid with submodules
-        run: |
-          echo "=== Cloning ByeDPIAndroid ==="
-          git clone --recursive https://github.com/dovecoteescapee/ByeDPIAndroid.git /tmp/byedpi
-          cd /tmp/byedpi
-          echo "Latest commit:"
+          git clone --recursive https://github.com/dovecoteescapee/ByeDPIAndroid.git byedpi
+          cd byedpi
+          echo "=== Latest commit ==="
           git log -1 --oneline
           echo ""
-          echo "Submodules:"
+          echo "=== Submodules ==="
           git submodule status
-
-      - name: Copy ByeDPI files to our repo
-        run: |
-          echo "=== Copying files ==="
-          # Копируем всё кроме .git
-          cd /tmp/byedpi
-          shopt -s dotglob
-          # Копируем все файлы и папки в корень нашего репо
-          for item in *; do
-            if [ "$item" != ".git" ]; then
-              cp -r "$item" "$GITHUB_WORKSPACE/"
-              echo "Copied: $item"
-            fi
-          done
-          # Копируем .gitmodules чтобы submodules работали
-          if [ -f ".gitmodules" ]; then
-            cp .gitmodules "$GITHUB_WORKSPACE/"
-            echo "Copied: .gitmodules"
-          fi
-          # Копируем .gitignore
-          if [ -f ".gitignore" ]; then
-            cp .gitignore "$GITHUB_WORKSPACE/"
-            echo "Copied: .gitignore"
-          fi
-
           echo ""
-          echo "=== Result ==="
-          cd "$GITHUB_WORKSPACE"
+          echo "=== Files ==="
           ls -la
 
-      - name: Copy submodule contents (since .gitmodules won't auto-resolve)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
         run: |
-          # Найдём все submodules в исходном репо и скопируем их содержимое
-          cd /tmp/byedpi
-          if [ -f ".gitmodules" ]; then
-            echo "=== Processing submodules ==="
-            # Парсим пути submodules
-            git config --file .gitmodules --get-regexp path | awk '{print $2}' | while read submodule_path; do
-              if [ -d "$submodule_path" ] && [ "$(ls -A $submodule_path)" ]; then
-                echo "Copying submodule: $submodule_path"
-                # Создаём целевую папку и копируем содержимое
-                mkdir -p "$GITHUB_WORKSPACE/$submodule_path"
-                cp -r "$submodule_path/." "$GITHUB_WORKSPACE/$submodule_path/"
-                # Удаляем .git внутри submodule если есть
-                rm -rf "$GITHUB_WORKSPACE/$submodule_path/.git"
-              fi
-            done
-          fi
+          NDK_VER="26.1.10909125"
+          echo "Installing NDK $NDK_VER..."
+          yes | sdkmanager --install "ndk;$NDK_VER" 2>&1 | tail -5
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
+          echo "NDK installed at: $ANDROID_HOME/ndk/$NDK_VER"
+          ls $ANDROID_HOME/ndk/
 
-          # Удаляем .gitmodules т.к. мы скопировали файлы напрямую
-          rm -f "$GITHUB_WORKSPACE/.gitmodules"
-          echo "Submodules expanded"
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
-      - name: Create build workflow
+      - name: Build APK
+        working-directory: byedpi
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/.github/workflows"
-          cat > "$GITHUB_WORKSPACE/.github/workflows/build.yml" << 'WORKFLOW'
-          name: Build_APK
-          on: [push, workflow_dispatch]
+          chmod +x gradlew
+          echo "=== Starting build ==="
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -200
 
-          jobs:
-            build:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Checkout
-                  uses: actions/checkout@v4
-
-                - name: Set up JDK 17
-                  uses: actions/setup-java@v4
-                  with:
-                    java-version: '17'
-                    distribution: 'temurin'
-
-                - name: Setup Android SDK
-                  uses: android-actions/setup-android@v3
-
-                - name: Install NDK
-                  run: |
-                    NDK_VER="26.1.10909125"
-                    echo "Installing NDK $NDK_VER..."
-                    yes | sdkmanager "ndk;$NDK_VER" || true
-                    echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
-                    echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
-                    ls $ANDROID_HOME/ndk/
-
-                - name: Setup Gradle
-                  uses: gradle/actions/setup-gradle@v3
-
-                - name: Build APK
-                  run: |
-                    chmod +x gradlew
-                    ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -150
-
-                - name: Find APK
-                  if: always()
-                  run: |
-                    echo "=== APK files ==="
-                    find . -name "*.apk" -type f 2>/dev/null
-                    echo ""
-                    echo "=== Build outputs ==="
-                    ls -laR app/build/outputs/ 2>/dev/null || echo "no outputs"
-
-                - name: Upload APK
-                  if: always()
-                  uses: actions/upload-artifact@v4
-                  with:
-                    name: ByeDPI_APK
-                    path: |
-                      app/build/outputs/apk/**/*.apk
-                      **/*.apk
-                    if-no-files-found: warn
-                    retention-days: 30
-          WORKFLOW
-          echo "Build workflow created"
-          cat "$GITHUB_WORKSPACE/.github/workflows/build.yml" | head -10
-
-      - name: Commit and push
+      - name: Find APK files
+        if: always()
         run: |
-          cd "$GITHUB_WORKSPACE"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          echo "=== Files to commit ==="
-          git status | head -30
-
-          git add -A
-          git commit -m "Clone ByeDPIAndroid and setup build workflow" || echo "Nothing to commit"
-          git push origin HEAD || git push origin main || git push origin master || echo "Push failed"
-
+          echo "=== APK files ==="
+          find byedpi -name "*.apk" -type f 2>/dev/null
           echo ""
-          echo "=== DONE ==="
-          echo "Now go to Actions tab and run 'Build_APK' workflow"
+          echo "=== Build outputs ==="
+          ls -laR byedpi/app/build/outputs/ 2>/dev/null || echo "no outputs"
+
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ByeDPI_APK
+          path: |
+            byedpi/app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
+          retention-days: 30
