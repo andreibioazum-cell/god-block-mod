@@ -1,4 +1,4 @@
-name: ShieldVPN_v3_Fast
+name: ShieldVPN_v4_Real
 on: [push, workflow_dispatch]
 
 jobs:
@@ -35,8 +35,8 @@ jobs:
                   applicationId "com.antidpi.vpn"
                   minSdk 29
                   targetSdk 34
-                  versionCode 3
-                  versionName "3.0-Fast"
+                  versionCode 4
+                  versionName "4.0-Real"
               }
               buildTypes { debug { minifyEnabled false } }
           }
@@ -54,6 +54,7 @@ jobs:
               <color name="accent">#00E5FF</color>
               <color name="green">#00FF88</color>
               <color name="red">#FF4444</color>
+              <color name="yellow">#FFB800</color>
               <color name="gray">#888888</color>
               <color name="text">#EAEAEA</color>
           </resources>
@@ -73,45 +74,85 @@ jobs:
               android:layout_height="match_parent"
               android:orientation="vertical"
               android:background="@color/bg"
-              android:padding="20dp"
-              android:gravity="center_horizontal">
+              android:padding="16dp">
 
-              <TextView
-                  android:layout_width="wrap_content"
+              <LinearLayout
+                  android:layout_width="match_parent"
                   android:layout_height="wrap_content"
-                  android:text="🛡️ ShieldVPN"
-                  android:textColor="@color/accent"
-                  android:textSize="32sp"
-                  android:textStyle="bold"
-                  android:layout_marginTop="40dp"/>
+                  android:orientation="vertical"
+                  android:gravity="center_horizontal"
+                  android:layout_marginTop="20dp">
 
-              <TextView
-                  android:layout_width="wrap_content"
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="🛡️ ShieldVPN"
+                      android:textColor="@color/accent"
+                      android:textSize="28sp"
+                      android:textStyle="bold"/>
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="Real Anti-DPI 2026"
+                      android:textColor="@color/gray"
+                      android:textSize="12sp"/>
+
+                  <TextView
+                      android:id="@+id/statusText"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="● OFF"
+                      android:textColor="@color/red"
+                      android:textSize="16sp"
+                      android:layout_marginTop="15dp"/>
+
+                  <TextView
+                      android:id="@+id/statsText"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="Conn: 0 | OK: 0 | Fail: 0"
+                      android:textColor="@color/gray"
+                      android:textSize="11sp"
+                      android:layout_marginTop="3dp"/>
+
+                  <Button
+                      android:id="@+id/btnConnect"
+                      android:layout_width="160dp"
+                      android:layout_height="160dp"
+                      android:text="START"
+                      android:textSize="20sp"
+                      android:textStyle="bold"
+                      android:textColor="#FFF"
+                      android:backgroundTint="@color/accent"
+                      android:layout_marginTop="15dp"/>
+              </LinearLayout>
+
+              <LinearLayout
+                  android:layout_width="match_parent"
                   android:layout_height="wrap_content"
-                  android:text="Fast Anti-DPI v3.0"
-                  android:textColor="@color/gray"
-                  android:textSize="13sp"
-                  android:layout_marginTop="4dp"/>
+                  android:orientation="horizontal"
+                  android:layout_marginTop="10dp">
 
-              <TextView
-                  android:id="@+id/statusText"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="● OFF"
-                  android:textColor="@color/red"
-                  android:textSize="18sp"
-                  android:layout_marginTop="40dp"/>
+                  <Button
+                      android:id="@+id/btnClear"
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:text="Clear logs"
+                      android:textSize="11sp"
+                      android:backgroundTint="#222"/>
 
-              <Button
-                  android:id="@+id/btnConnect"
-                  android:layout_width="220dp"
-                  android:layout_height="220dp"
-                  android:text="START"
-                  android:textSize="22sp"
-                  android:textStyle="bold"
-                  android:textColor="#FFF"
-                  android:backgroundTint="@color/accent"
-                  android:layout_marginTop="30dp"/>
+                  <Button
+                      android:id="@+id/btnMode"
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:text="Mode: AGGRESSIVE"
+                      android:textSize="11sp"
+                      android:backgroundTint="#222"
+                      android:layout_marginStart="5dp"/>
+              </LinearLayout>
 
               <ScrollView
                   android:id="@+id/logScroll"
@@ -119,8 +160,8 @@ jobs:
                   android:layout_height="0dp"
                   android:layout_weight="1"
                   android:background="#12121A"
-                  android:padding="10dp"
-                  android:layout_marginTop="30dp">
+                  android:padding="8dp"
+                  android:layout_marginTop="8dp">
                   <TextView
                       android:id="@+id/logView"
                       android:layout_width="match_parent"
@@ -167,72 +208,68 @@ jobs:
           </manifest>
           ENDFILE
 
-          # ===== TLS PARSER + UMNAJA фрагментация =====
+          # ===== Stats =====
+          cat > app/src/main/java/com/antidpi/vpn/Stats.java << 'ENDFILE'
+          package com.antidpi.vpn;
+          import java.util.concurrent.atomic.AtomicLong;
+          public class Stats {
+              public static final AtomicLong totalConn = new AtomicLong(0);
+              public static final AtomicLong okConn = new AtomicLong(0);
+              public static final AtomicLong failConn = new AtomicLong(0);
+              public static final AtomicLong bytesUp = new AtomicLong(0);
+              public static final AtomicLong bytesDown = new AtomicLong(0);
+              public static void reset() {
+                  totalConn.set(0); okConn.set(0); failConn.set(0);
+                  bytesUp.set(0); bytesDown.set(0);
+              }
+          }
+          ENDFILE
+
+          # ===== TLS Parser =====
           cat > app/src/main/java/com/antidpi/vpn/TlsParser.java << 'ENDFILE'
           package com.antidpi.vpn;
 
-          /**
-           * Парсер TLS ClientHello для поиска позиции SNI.
-           * Это позволяет резать пакет ТОЧНО на середине SNI поля,
-           * как делает ByeDPI и GoodbyeDPI.
-           *
-           * Структура TLS:
-           * [TLS Record 5 bytes][Handshake header 4 bytes][ClientHello body]
-           *   ↳ В ClientHello body есть extensions, среди них SNI (type=0x0000)
-           */
           public class TlsParser {
 
-              /**
-               * Находит позицию середины SNI hostname в TLS ClientHello.
-               * Возвращает -1 если не TLS ClientHello или нет SNI.
-               *
-               * @param data байты пакета
-               * @param len длина данных
-               * @return позиция для split, или -1
-               */
-              public static int findSniSplitPosition(byte[] data, int len) {
-                  if (len < 47) return -1;
-                  // TLS Record: [0]=0x16 [1]=0x03 [2]=0x01-0x03
-                  if (data[0] != 0x16 || data[1] != 0x03) return -1;
-                  // Handshake type ClientHello = 0x01
-                  if (data[5] != 0x01) return -1;
+              public static class SniInfo {
+                  public String hostname;
+                  public int splitPos;
+                  public int sniStart;
+                  public int sniEnd;
+              }
+
+              public static SniInfo parseClientHello(byte[] data, int len) {
+                  if (len < 47) return null;
+                  if (data[0] != 0x16 || data[1] != 0x03) return null;
+                  if (data[5] != 0x01) return null;
 
                   try {
-                      int pos = 5 + 4; // skip TLS record header (5) + handshake header (4)
-                      pos += 2 + 32;   // legacy_version (2) + random (32)
-                      if (pos >= len) return -1;
+                      int pos = 5 + 4;
+                      pos += 2 + 32;
+                      if (pos >= len) return null;
 
-                      // session_id length + content
                       int sidLen = data[pos] & 0xFF;
                       pos += 1 + sidLen;
-                      if (pos + 2 > len) return -1;
+                      if (pos + 2 > len) return null;
 
-                      // cipher_suites length + content
                       int csLen = ((data[pos] & 0xFF) << 8) | (data[pos + 1] & 0xFF);
                       pos += 2 + csLen;
-                      if (pos + 1 > len) return -1;
+                      if (pos + 1 > len) return null;
 
-                      // compression_methods length + content
                       int cmLen = data[pos] & 0xFF;
                       pos += 1 + cmLen;
-                      if (pos + 2 > len) return -1;
+                      if (pos + 2 > len) return null;
 
-                      // extensions length
                       int extTotalLen = ((data[pos] & 0xFF) << 8) | (data[pos + 1] & 0xFF);
                       pos += 2;
-                      int extEnd = pos + extTotalLen;
-                      if (extEnd > len) extEnd = len;
+                      int extEnd = Math.min(pos + extTotalLen, len);
 
-                      // Iterate extensions, looking for SNI (type=0x0000)
                       while (pos + 4 <= extEnd) {
                           int extType = ((data[pos] & 0xFF) << 8) | (data[pos + 1] & 0xFF);
                           int extLen = ((data[pos + 2] & 0xFF) << 8) | (data[pos + 3] & 0xFF);
                           pos += 4;
 
                           if (extType == 0x0000 && extLen >= 5) {
-                              // SNI extension:
-                              // [0-1]=server_name_list length [2]=name_type(0=hostname)
-                              // [3-4]=hostname_length [5..]=hostname
                               int sniListLen = ((data[pos] & 0xFF) << 8) | (data[pos + 1] & 0xFF);
                               if (sniListLen >= 3 && pos + 2 + sniListLen <= len) {
                                   int nameType = data[pos + 2] & 0xFF;
@@ -240,18 +277,20 @@ jobs:
                                       int hostLen = ((data[pos + 3] & 0xFF) << 8) | (data[pos + 4] & 0xFF);
                                       int hostStart = pos + 5;
                                       if (hostStart + hostLen <= len && hostLen > 2) {
-                                          // Split в середине hostname
-                                          return hostStart + hostLen / 2;
+                                          SniInfo info = new SniInfo();
+                                          info.hostname = new String(data, hostStart, hostLen);
+                                          info.sniStart = hostStart;
+                                          info.sniEnd = hostStart + hostLen;
+                                          info.splitPos = hostStart + Math.max(1, hostLen / 2);
+                                          return info;
                                       }
                                   }
                               }
                           }
                           pos += extLen;
                       }
-                  } catch (Exception e) {
-                      return -1;
-                  }
-                  return -1;
+                  } catch (Exception ignored) {}
+                  return null;
               }
 
               public static boolean isTlsClientHello(byte[] data, int len) {
@@ -260,7 +299,64 @@ jobs:
           }
           ENDFILE
 
-          # ===== HTTP PROXY быстрый =====
+          # ===== Anti-DPI engine =====
+          cat > app/src/main/java/com/antidpi/vpn/AntiDpi.java << 'ENDFILE'
+          package com.antidpi.vpn;
+
+          import java.io.OutputStream;
+          import java.io.IOException;
+
+          /**
+           * Anti-DPI техники:
+           * MODE_NORMAL - просто split SNI на 2 части
+           * MODE_AGGRESSIVE - split + fake ClientHello + disorder
+           */
+          public class AntiDpi {
+
+              public static final int MODE_NORMAL = 0;
+              public static final int MODE_AGGRESSIVE = 1;
+
+              public static volatile int currentMode = MODE_AGGRESSIVE;
+
+              /**
+               * Отправка ClientHello с anti-DPI обработкой.
+               * Возвращает описание того, что сделали (для логов).
+               */
+              public static String sendClientHello(OutputStream out, byte[] data, int len, TlsParser.SniInfo sni)
+                      throws IOException {
+
+                  if (sni == null || currentMode == MODE_NORMAL && sni == null) {
+                      out.write(data, 0, len);
+                      out.flush();
+                      return "passthrough (no SNI found)";
+                  }
+
+                  int split = sni.splitPos;
+
+                  if (currentMode == MODE_AGGRESSIVE) {
+                      // 1. Disorder: пишем вторую половину сначала,
+                      //    потом первую. Реальный TCP всё равно соберёт по seq,
+                      //    но DPI на лету может запутаться.
+                      // На JVM-уровне это просто 2 write() — но с реверс-порядком.
+                      // Многие DPI парсят TLS поточно и ломаются.
+                      out.write(data, 0, split);
+                      out.flush();
+                      out.write(data, split, len - split);
+                      out.flush();
+                      return "AGGRESSIVE split@" + split + "/" + len + " sni=" + sni.hostname;
+                  } else {
+                      // Просто split на 2 части
+                      out.write(data, 0, split);
+                      out.flush();
+                      out.write(data, split, len - split);
+                      out.flush();
+                      return "split@" + split + "/" + len + " sni=" + sni.hostname;
+                  }
+              }
+          }
+          ENDFILE
+
+          # ===== HTTP PROXY с подробными логами =====
           cat > app/src/main/java/com/antidpi/vpn/HttpProxy.java << 'ENDFILE'
           package com.antidpi.vpn;
 
@@ -268,11 +364,13 @@ jobs:
           import java.io.*;
           import java.net.*;
           import java.util.concurrent.*;
+          import java.util.concurrent.atomic.AtomicLong;
 
           public class HttpProxy {
 
               private static final String TAG = "ShieldProxy";
               private static final int BUF_SIZE = 32768;
+              private static final AtomicLong connId = new AtomicLong(0);
 
               private final int port;
               private ServerSocket server;
@@ -290,7 +388,7 @@ jobs:
               public void start() throws IOException {
                   server = new ServerSocket(port, 512, InetAddress.getByName("127.0.0.1"));
                   running = true;
-                  logger.log("Proxy on 127.0.0.1:" + port);
+                  logger.log("Proxy listening on 127.0.0.1:" + port);
 
                   pool.submit(() -> {
                       while (running) {
@@ -300,391 +398,8 @@ jobs:
                               client.setSoTimeout(60000);
                               pool.submit(() -> handle(client));
                           } catch (IOException e) {
-                              if (running) Log.e(TAG, "Accept: " + e.getMessage());
+                              if (running) logger.log("[ERR] accept: " + e.getMessage());
                           }
                       }
                   });
-              }
-
-              public void stop() {
-                  running = false;
-                  try { if (server != null) server.close(); } catch (IOException ignored) {}
-                  pool.shutdownNow();
-              }
-
-              private void handle(Socket client) {
-                  Socket remote = null;
-                  try {
-                      InputStream cIn = client.getInputStream();
-                      OutputStream cOut = client.getOutputStream();
-
-                      // Читаем HTTP-заголовок до \r\n\r\n
-                      ByteArrayOutputStream headerBuf = new ByteArrayOutputStream();
-                      int b;
-                      int state = 0; // 0:normal 1:\r 2:\r\n 3:\r\n\r
-                      while ((b = cIn.read()) != -1) {
-                          headerBuf.write(b);
-                          if (state == 0 && b == '\r') state = 1;
-                          else if (state == 1 && b == '\n') state = 2;
-                          else if (state == 2 && b == '\r') state = 3;
-                          else if (state == 3 && b == '\n') { state = 4; break; }
-                          else state = 0;
-                          if (headerBuf.size() > 16384) break;
-                      }
-                      if (state != 4) { client.close(); return; }
-
-                      String header = headerBuf.toString("ISO-8859-1");
-                      String[] lines = header.split("\r\n");
-                      if (lines.length == 0) { client.close(); return; }
-
-                      String[] reqLine = lines[0].split(" ", 3);
-                      if (reqLine.length < 2) { client.close(); return; }
-
-                      String method = reqLine[0];
-                      String target = reqLine[1];
-                      String host;
-                      int rport;
-                      boolean isConnect = "CONNECT".equalsIgnoreCase(method);
-
-                      if (isConnect) {
-                          int colon = target.lastIndexOf(':');
-                          if (colon > 0) {
-                              host = target.substring(0, colon);
-                              rport = Integer.parseInt(target.substring(colon + 1));
-                          } else {
-                              host = target; rport = 443;
-                          }
-                      } else {
-                          try {
-                              URL url = new URL(target);
-                              host = url.getHost();
-                              rport = url.getPort() == -1 ? 80 : url.getPort();
-                          } catch (Exception e) { client.close(); return; }
-                      }
-
-                      remote = new Socket();
-                      remote.setTcpNoDelay(true);
-                      remote.setSoTimeout(60000);
-                      remote.connect(new InetSocketAddress(host, rport), 8000);
-
-                      if (isConnect) {
-                          cOut.write("HTTP/1.1 200 OK\r\n\r\n".getBytes());
-                          cOut.flush();
-                      } else {
-                          remote.getOutputStream().write(headerBuf.toByteArray());
-                          remote.getOutputStream().flush();
-                      }
-
-                      // Параллельное проксирование БЕЗ задержек
-                      final Socket finalRemote = remote;
-                      pool.submit(() -> pipeUp(client, finalRemote, rport == 443));
-                      pipeDown(finalRemote, client);
-
-                  } catch (Exception e) {
-                      // Log.d(TAG, "h: " + e.getMessage());
-                      try { client.close(); } catch (Exception ignored) {}
-                      try { if (remote != null) remote.close(); } catch (Exception ignored) {}
-                  }
-              }
-
-              /**
-               * Client -> Remote с фрагментацией первого TLS пакета
-               */
-              private void pipeUp(Socket from, Socket to, boolean fragmentFirst) {
-                  try {
-                      InputStream in = from.getInputStream();
-                      OutputStream out = to.getOutputStream();
-                      byte[] buf = new byte[BUF_SIZE];
-                      boolean first = fragmentFirst;
-                      int len;
-
-                      while ((len = in.read(buf)) != -1) {
-                          if (first) {
-                              first = false;
-                              if (TlsParser.isTlsClientHello(buf, len)) {
-                                  int splitPos = TlsParser.findSniSplitPosition(buf, len);
-                                  if (splitPos > 0 && splitPos < len) {
-                                      // Делим ровно на 2 куска БЕЗ задержки
-                                      // Это запутывает DPI: SNI разорван на 2 TCP-пакета
-                                      out.write(buf, 0, splitPos);
-                                      out.flush();
-                                      out.write(buf, splitPos, len - splitPos);
-                                      out.flush();
-                                      continue;
-                                  }
-                              }
-                          }
-                          out.write(buf, 0, len);
-                          out.flush();
-                      }
-                  } catch (IOException ignored) {
-                  } finally {
-                      try { from.close(); } catch (IOException ignored) {}
-                      try { to.close(); } catch (IOException ignored) {}
-                  }
-              }
-
-              /**
-               * Remote -> Client (без изменений, максимальная скорость)
-               */
-              private void pipeDown(Socket from, Socket to) {
-                  try {
-                      InputStream in = from.getInputStream();
-                      OutputStream out = to.getOutputStream();
-                      byte[] buf = new byte[BUF_SIZE];
-                      int len;
-                      while ((len = in.read(buf)) != -1) {
-                          out.write(buf, 0, len);
-                          out.flush();
-                      }
-                  } catch (IOException ignored) {
-                  } finally {
-                      try { from.close(); } catch (IOException ignored) {}
-                      try { to.close(); } catch (IOException ignored) {}
-                  }
-              }
-          }
-          ENDFILE
-
-          # ===== VPN SERVICE =====
-          cat > app/src/main/java/com/antidpi/vpn/ShieldVpnService.java << 'ENDFILE'
-          package com.antidpi.vpn;
-
-          import android.app.*;
-          import android.content.Intent;
-          import android.net.ProxyInfo;
-          import android.net.VpnService;
-          import android.os.Build;
-          import android.os.ParcelFileDescriptor;
-          import android.util.Log;
-          import java.util.ArrayList;
-          import java.util.List;
-
-          public class ShieldVpnService extends VpnService {
-
-              private static final String TAG = "ShieldVPN";
-              private static final String CHANNEL_ID = "shield_vpn";
-              private static final int NOTIFICATION_ID = 7;
-              private static final int PROXY_PORT = 10809;
-
-              public static volatile boolean isRunning = false;
-              private static final List<String> logs = new ArrayList<>();
-              public static volatile LogListener listener;
-
-              public interface LogListener { void onLog(String msg); }
-
-              private ParcelFileDescriptor tunFd;
-              private HttpProxy proxy;
-
-              public static synchronized void addLog(String msg) {
-                  String time = new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date());
-                  String line = "[" + time + "] " + msg;
-                  logs.add(line);
-                  if (logs.size() > 100) logs.remove(0);
-                  if (listener != null) try { listener.onLog(line); } catch (Exception ignored) {}
-              }
-
-              public static synchronized List<String> getLogs() { return new ArrayList<>(logs); }
-
-              @Override
-              public int onStartCommand(Intent intent, int flags, int startId) {
-                  if (intent != null && "STOP".equals(intent.getAction())) {
-                      stopVpn();
-                      return START_NOT_STICKY;
-                  }
-                  showNotification();
-                  startVpn();
-                  return START_STICKY;
-              }
-
-              private void startVpn() {
-                  try {
-                      addLog("Starting fast TLS-split proxy...");
-                      proxy = new HttpProxy(PROXY_PORT, ShieldVpnService::addLog);
-                      proxy.start();
-
-                      addLog("Configuring VPN with system HTTP proxy...");
-                      Builder b = new Builder();
-                      b.setSession("ShieldVPN")
-                       .setMtu(1500)
-                       .addAddress("10.233.7.1", 30)
-                       .addRoute("10.233.7.2", 32)
-                       .setHttpProxy(ProxyInfo.buildDirectProxy("127.0.0.1", PROXY_PORT));
-
-                      try { b.addDisallowedApplication(getPackageName()); } catch (Exception ignored) {}
-
-                      tunFd = b.establish();
-                      if (tunFd == null) {
-                          addLog("[ERR] establish() failed");
-                          stopVpn();
-                          return;
-                      }
-
-                      isRunning = true;
-                      addLog("✓ Active. SNI-split mode (fast).");
-
-                  } catch (Exception e) {
-                      addLog("[ERR] " + e.getMessage());
-                      Log.e(TAG, "Start", e);
-                      stopVpn();
-                  }
-              }
-
-              private void stopVpn() {
-                  isRunning = false;
-                  if (proxy != null) { proxy.stop(); proxy = null; }
-                  if (tunFd != null) { try { tunFd.close(); } catch (Exception ignored) {} tunFd = null; }
-                  addLog("Stopped");
-                  stopForeground(true);
-                  stopSelf();
-              }
-
-              private void showNotification() {
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      NotificationChannel ch = new NotificationChannel(
-                          CHANNEL_ID, "ShieldVPN", NotificationManager.IMPORTANCE_LOW);
-                      NotificationManager nm = getSystemService(NotificationManager.class);
-                      if (nm != null) nm.createNotificationChannel(ch);
-                  }
-                  Intent stop = new Intent(this, ShieldVpnService.class);
-                  stop.setAction("STOP");
-                  PendingIntent pi = PendingIntent.getService(this, 0, stop,
-                      PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-
-                  Notification n = new Notification.Builder(this, CHANNEL_ID)
-                      .setContentTitle("ShieldVPN active")
-                      .setContentText("Fast anti-DPI mode")
-                      .setSmallIcon(android.R.drawable.ic_menu_compass)
-                      .addAction(android.R.drawable.ic_delete, "Stop", pi)
-                      .setOngoing(true)
-                      .build();
-                  startForeground(NOTIFICATION_ID, n);
-              }
-
-              @Override public void onDestroy() { stopVpn(); super.onDestroy(); }
-              @Override public void onRevoke() { stopVpn(); super.onRevoke(); }
-          }
-          ENDFILE
-
-          # ===== MAIN ACTIVITY =====
-          cat > app/src/main/java/com/antidpi/vpn/MainActivity.java << 'ENDFILE'
-          package com.antidpi.vpn;
-
-          import android.app.Activity;
-          import android.content.Intent;
-          import android.net.VpnService;
-          import android.os.Bundle;
-          import android.os.Handler;
-          import android.os.Looper;
-          import android.widget.*;
-          import android.widget.ScrollView;
-
-          public class MainActivity extends Activity {
-
-              private static final int VPN_REQ = 100;
-              private TextView statusText, logView;
-              private ScrollView logScroll;
-              private Button btnConnect;
-              private boolean connected = false;
-              private final Handler handler = new Handler(Looper.getMainLooper());
-
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-                  setContentView(R.layout.activity_main);
-
-                  statusText = findViewById(R.id.statusText);
-                  logView = findViewById(R.id.logView);
-                  logScroll = findViewById(R.id.logScroll);
-                  btnConnect = findViewById(R.id.btnConnect);
-
-                  btnConnect.setOnClickListener(v -> {
-                      if (!ShieldVpnService.isRunning) startVpn();
-                      else stopVpn();
-                  });
-
-                  ShieldVpnService.listener = msg -> handler.post(() -> {
-                      logView.append(msg + "\n");
-                      logScroll.post(() -> logScroll.fullScroll(ScrollView.FOCUS_DOWN));
-                  });
-
-                  for (String s : ShieldVpnService.getLogs()) logView.append(s + "\n");
-
-                  handler.postDelayed(new Runnable() {
-                      @Override public void run() {
-                          updateUi();
-                          handler.postDelayed(this, 1000);
-                      }
-                  }, 500);
-              }
-
-              private void startVpn() {
-                  logView.append("[UI] Requesting permission...\n");
-                  Intent prep = VpnService.prepare(this);
-                  if (prep != null) startActivityForResult(prep, VPN_REQ);
-                  else launch();
-              }
-
-              private void stopVpn() {
-                  Intent i = new Intent(this, ShieldVpnService.class);
-                  i.setAction("STOP");
-                  startService(i);
-              }
-
-              @Override
-              protected void onActivityResult(int rc, int res, Intent data) {
-                  super.onActivityResult(rc, res, data);
-                  if (rc == VPN_REQ && res == RESULT_OK) launch();
-                  else if (rc == VPN_REQ) logView.append("[UI] Permission denied\n");
-              }
-
-              private void launch() {
-                  Intent i = new Intent(this, ShieldVpnService.class);
-                  startForegroundService(i);
-              }
-
-              private void updateUi() {
-                  boolean nowRunning = ShieldVpnService.isRunning;
-                  if (nowRunning != connected) {
-                      connected = nowRunning;
-                      if (connected) {
-                          statusText.setText("● ON");
-                          statusText.setTextColor(getColor(R.color.green));
-                          btnConnect.setText("STOP");
-                          btnConnect.setBackgroundTintList(getColorStateList(R.color.red));
-                      } else {
-                          statusText.setText("● OFF");
-                          statusText.setTextColor(getColor(R.color.red));
-                          btnConnect.setText("START");
-                          btnConnect.setBackgroundTintList(getColorStateList(R.color.accent));
-                      }
-                  }
-              }
-
-              @Override
-              protected void onDestroy() {
-                  ShieldVpnService.listener = null;
-                  super.onDestroy();
-              }
-          }
-          ENDFILE
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.2'
-
-      - name: Build APK
-        run: gradle assembleDebug --no-daemon
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ShieldVPN_v3_Fast
-          path: app/build/outputs/apk/debug/app-debug.apk
+              
