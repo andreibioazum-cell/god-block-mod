@@ -1,1011 +1,174 @@
-name: ShieldVPN_v5_Real_Tunnel
-on: [push, workflow_dispatch]
+name: Clone_ByeDPI_To_Repo
+on: [workflow_dispatch]
+
+# Даём workflow права на запись в репозиторий
+permissions:
+  contents: write
 
 jobs:
-  build:
+  clone:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout our repo
         uses: actions/checkout@v4
-
-      - name: Setup project structure
-        run: |
-          mkdir -p app/src/main/java/com/antidpi/vpn
-          mkdir -p app/src/main/jniLibs/arm64-v8a
-          mkdir -p app/src/main/jniLibs/armeabi-v7a
-          mkdir -p app/src/main/res/layout
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/assets
-
-      - name: Download prebuilt hev-socks5-tunnel binaries
-        run: |
-          echo "=== Downloading prebuilt tun2socks for Android ==="
-          # Используем готовые бинари из проекта hev-socks5-tunnel (релизы)
-          VERSION="2.7.2"
-          BASE="https://github.com/heiher/hev-socks5-tunnel/releases/download/${VERSION}"
-
-          # arm64-v8a (большинство современных телефонов)
-          wget -q "${BASE}/hev-socks5-tunnel-linux-android-arm64.tar.gz" -O arm64.tar.gz || echo "arm64 download failed, will use fallback"
-
-          # armeabi-v7a (старые телефоны)
-          wget -q "${BASE}/hev-socks5-tunnel-linux-android-armv7.tar.gz" -O armv7.tar.gz || echo "armv7 download failed"
-
-          ls -la *.tar.gz || echo "No archives downloaded"
-
-      - name: Create build files
-        run: |
-          cat > settings.gradle << 'ENDFILE'
-          include ':app'
-          ENDFILE
-
-          cat > build.gradle << 'ENDFILE'
-          buildscript {
-              repositories { google(); mavenCentral() }
-              dependencies { classpath 'com.android.tools.build:gradle:8.1.1' }
-          }
-          allprojects { repositories { google(); mavenCentral() } }
-          ENDFILE
-
-          cat > app/build.gradle << 'ENDFILE'
-          plugins { id 'com.android.application' }
-          android {
-              namespace 'com.antidpi.vpn'
-              compileSdk 34
-              defaultConfig {
-                  applicationId "com.antidpi.vpn"
-                  minSdk 24
-                  targetSdk 34
-                  versionCode 5
-                  versionName "5.0-RealTunnel"
-                  ndk {
-                      abiFilters 'arm64-v8a', 'armeabi-v7a'
-                  }
-              }
-              buildTypes { debug { minifyEnabled false } }
-              packagingOptions {
-                  jniLibs {
-                      useLegacyPackaging = true
-                  }
-              }
-          }
-          ENDFILE
-
-          cat > gradle.properties << 'ENDFILE'
-          android.useAndroidX=true
-          org.gradle.jvmargs=-Xmx2048m
-          ENDFILE
-
-      - name: Create resources
-        run: |
-          cat > app/src/main/res/values/colors.xml << 'ENDFILE'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="bg">#0A0A0F</color>
-              <color name="accent">#00E5FF</color>
-              <color name="green">#00FF88</color>
-              <color name="red">#FF4444</color>
-              <color name="yellow">#FFB800</color>
-              <color name="gray">#888888</color>
-              <color name="text">#EAEAEA</color>
-          </resources>
-          ENDFILE
-
-          cat > app/src/main/res/values/strings.xml << 'ENDFILE'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="app_name">ShieldVPN</string>
-          </resources>
-          ENDFILE
-
-          cat > app/src/main/res/layout/activity_main.xml << 'ENDFILE'
-          <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:orientation="vertical"
-              android:background="@color/bg"
-              android:padding="16dp">
-
-              <LinearLayout
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:orientation="vertical"
-                  android:gravity="center_horizontal"
-                  android:layout_marginTop="15dp">
-
-                  <TextView
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="ShieldVPN"
-                      android:textColor="@color/accent"
-                      android:textSize="26sp"
-                      android:textStyle="bold"/>
-
-                  <TextView
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="Real Tunnel v5.0"
-                      android:textColor="@color/gray"
-                      android:textSize="12sp"/>
-
-                  <TextView
-                      android:id="@+id/statusText"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="OFF"
-                      android:textColor="@color/red"
-                      android:textSize="16sp"
-                      android:layout_marginTop="12sp"/>
-
-                  <TextView
-                      android:id="@+id/statsText"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="Conn: 0 | OK: 0 | Fail: 0"
-                      android:textColor="@color/gray"
-                      android:textSize="11sp"
-                      android:layout_marginTop="3dp"/>
-
-                  <Button
-                      android:id="@+id/btnConnect"
-                      android:layout_width="140dp"
-                      android:layout_height="140dp"
-                      android:text="START"
-                      android:textSize="18sp"
-                      android:textStyle="bold"
-                      android:textColor="#FFF"
-                      android:backgroundTint="@color/accent"
-                      android:layout_marginTop="12dp"/>
-              </LinearLayout>
-
-              <LinearLayout
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:orientation="horizontal"
-                  android:layout_marginTop="10dp">
-
-                  <Button
-                      android:id="@+id/btnClear"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:text="Clear logs"
-                      android:textSize="11sp"
-                      android:backgroundTint="#222"/>
-
-                  <Button
-                      android:id="@+id/btnMode"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:text="Anti-DPI: ON"
-                      android:textSize="11sp"
-                      android:backgroundTint="#222"
-                      android:layout_marginStart="5dp"/>
-              </LinearLayout>
-
-              <ScrollView
-                  android:id="@+id/logScroll"
-                  android:layout_width="match_parent"
-                  android:layout_height="0dp"
-                  android:layout_weight="1"
-                  android:background="#12121A"
-                  android:padding="8dp"
-                  android:layout_marginTop="8dp">
-                  <TextView
-                      android:id="@+id/logView"
-                      android:layout_width="match_parent"
-                      android:layout_height="wrap_content"
-                      android:textColor="@color/text"
-                      android:textSize="10sp"
-                      android:fontFamily="monospace"
-                      android:text=""/>
-              </ScrollView>
-          </LinearLayout>
-          ENDFILE
-
-          cat > app/src/main/AndroidManifest.xml << 'ENDFILE'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-
-              <application
-                  android:label="@string/app_name"
-                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
-                  android:icon="@android:drawable/ic_menu_compass"
-                  android:extractNativeLibs="true"
-                  android:usesCleartextTraffic="true">
-
-                  <activity android:name=".MainActivity" android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity>
-
-                  <service
-                      android:name=".ShieldVpnService"
-                      android:permission="android.permission.BIND_VPN_SERVICE"
-                      android:exported="false"
-                      android:foregroundServiceType="specialUse">
-                      <intent-filter>
-                          <action android:name="android.net.VpnService"/>
-                      </intent-filter>
-                  </service>
-              </application>
-          </manifest>
-          ENDFILE
-
-      - name: Build hev-socks5-tunnel from source
-        run: |
-          echo "=== Cloning hev-socks5-tunnel ==="
-          cd /tmp
-          git clone --recursive https://github.com/heiher/hev-socks5-tunnel.git
-          cd hev-socks5-tunnel
-
-          echo "=== Setting up Android NDK ==="
-          # GitHub Actions Ubuntu имеет NDK по умолчанию
-          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk-bundle"
-          if [ ! -d "$ANDROID_NDK_HOME" ]; then
-            ANDROID_NDK_HOME=$(ls -d $ANDROID_HOME/ndk/* 2>/dev/null | head -1)
-          fi
-          echo "NDK: $ANDROID_NDK_HOME"
-          ls $ANDROID_NDK_HOME 2>/dev/null || echo "NDK not found in expected paths"
-
-          # Если NDK всё-таки нет — установим
-          if [ -z "$ANDROID_NDK_HOME" ] || [ ! -d "$ANDROID_NDK_HOME" ]; then
-            echo "Installing NDK manually..."
-            wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip -O ndk.zip
-            unzip -q ndk.zip -d $HOME
-            export ANDROID_NDK_HOME="$HOME/android-ndk-r26b"
-          fi
-
-          echo "Final NDK path: $ANDROID_NDK_HOME"
-
-          # Сборка для arm64-v8a
-          echo "=== Building for arm64-v8a ==="
-          make clean 2>/dev/null || true
-          make ENABLE_STATIC=1 \
-               CROSS_PREFIX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24- \
-               CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang \
-               -j$(nproc) || echo "arm64 build failed"
-
-          if [ -f "bin/hev-socks5-tunnel" ]; then
-            cp bin/hev-socks5-tunnel $GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libhev-socks5-tunnel.so
-            echo "arm64 binary copied"
-          else
-            echo "arm64 binary NOT created"
-          fi
-
-          # Сборка для armeabi-v7a
-          echo "=== Building for armeabi-v7a ==="
-          make clean 2>/dev/null || true
-          make ENABLE_STATIC=1 \
-               CROSS_PREFIX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24- \
-               CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi24-clang \
-               -j$(nproc) || echo "armv7 build failed"
-
-          if [ -f "bin/hev-socks5-tunnel" ]; then
-            cp bin/hev-socks5-tunnel $GITHUB_WORKSPACE/app/src/main/jniLibs/armeabi-v7a/libhev-socks5-tunnel.so
-            echo "armv7 binary copied"
-          else
-            echo "armv7 binary NOT created"
-          fi
-
-          echo "=== Final jniLibs ==="
-          ls -laR $GITHUB_WORKSPACE/app/src/main/jniLibs/
-
-      - name: Create Java sources
-        run: |
-          # ===== Stats =====
-          cat > app/src/main/java/com/antidpi/vpn/Stats.java << 'ENDFILE'
-          package com.antidpi.vpn;
-          import java.util.concurrent.atomic.AtomicLong;
-          public class Stats {
-              public static final AtomicLong totalConn = new AtomicLong(0);
-              public static final AtomicLong okConn = new AtomicLong(0);
-              public static final AtomicLong failConn = new AtomicLong(0);
-              public static final AtomicLong bytesUp = new AtomicLong(0);
-              public static final AtomicLong bytesDown = new AtomicLong(0);
-              public static void reset() {
-                  totalConn.set(0); okConn.set(0); failConn.set(0);
-                  bytesUp.set(0); bytesDown.set(0);
-              }
-          }
-          ENDFILE
-
-          # ===== TLS Parser =====
-          cat > app/src/main/java/com/antidpi/vpn/TlsParser.java << 'ENDFILE'
-          package com.antidpi.vpn;
-
-          public class TlsParser {
-
-              public static class SniInfo {
-                  public String hostname;
-                  public int splitPos;
-              }
-
-              public static SniInfo parseClientHello(byte[] data, int len) {
-                  if (len < 47) return null;
-                  if (data[0] != 0x16 || data[1] != 0x03) return null;
-                  if (data[5] != 0x01) return null;
-
-                  try {
-                      int pos = 5 + 4;
-                      pos += 2 + 32;
-                      if (pos >= len) return null;
-
-                      int sidLen = data[pos] & 0xFF;
-                      pos += 1 + sidLen;
-                      if (pos + 2 > len) return null;
-
-                      int csLen = ((data[pos] & 0xFF) << 8) | (data[pos + 1] & 0xFF);
-                      pos += 2 + csLen;
-                      if (pos + 1 > len) return null;
-
-                      int cmLen = data[pos] & 0xFF;
-                      pos += 1 + cmLen;
-                      if (pos + 2 > len) return null;
-
-                      int extTotalLen = ((data[pos] & 0xFF) << 8) | (data[pos + 1] & 0xFF);
-                      pos += 2;
-                      int extEnd = Math.min(pos + extTotalLen, len);
-
-                      while (pos + 4 <= extEnd) {
-                          int extType = ((data[pos] & 0xFF) << 8) | (data[pos + 1] & 0xFF);
-                          int extLen = ((data[pos + 2] & 0xFF) << 8) | (data[pos + 3] & 0xFF);
-                          pos += 4;
-
-                          if (extType == 0x0000 && extLen >= 5) {
-                              int sniListLen = ((data[pos] & 0xFF) << 8) | (data[pos + 1] & 0xFF);
-                              if (sniListLen >= 3 && pos + 2 + sniListLen <= len) {
-                                  int nameType = data[pos + 2] & 0xFF;
-                                  if (nameType == 0) {
-                                      int hostLen = ((data[pos + 3] & 0xFF) << 8) | (data[pos + 4] & 0xFF);
-                                      int hostStart = pos + 5;
-                                      if (hostStart + hostLen <= len && hostLen > 2) {
-                                          SniInfo info = new SniInfo();
-                                          info.hostname = new String(data, hostStart, hostLen);
-                                          info.splitPos = hostStart + Math.max(1, hostLen / 2);
-                                          return info;
-                                      }
-                                  }
-                              }
-                          }
-                          pos += extLen;
-                      }
-                  } catch (Exception ignored) {}
-                  return null;
-              }
-
-              public static boolean isTlsClientHello(byte[] data, int len) {
-                  return len >= 6 && data[0] == 0x16 && data[1] == 0x03 && data[5] == 0x01;
-              }
-          }
-          ENDFILE
-
-          # ===== Socks5 Server with Anti-DPI =====
-          cat > app/src/main/java/com/antidpi/vpn/Socks5Server.java << 'ENDFILE'
-          package com.antidpi.vpn;
-
-          import java.io.*;
-          import java.net.*;
-          import java.nio.charset.StandardCharsets;
-          import java.util.concurrent.*;
-          import java.util.concurrent.atomic.AtomicLong;
-
-          /**
-           * SOCKS5 сервер. Получает соединения от tun2socks
-           * и фрагментирует TLS ClientHello для обхода DPI.
-           */
-          public class Socks5Server {
-
-              private static final int BUF_SIZE = 32768;
-              private static final AtomicLong connId = new AtomicLong(0);
-
-              public static volatile boolean antiDpiEnabled = true;
-
-              private final int port;
-              private ServerSocket server;
-              private volatile boolean running = false;
-              private final ExecutorService pool = Executors.newCachedThreadPool();
-
-              public interface Logger { void log(String msg); }
-              private final Logger logger;
-
-              public Socks5Server(int port, Logger logger) {
-                  this.port = port;
-                  this.logger = logger;
-              }
-
-              public void start() throws IOException {
-                  server = new ServerSocket(port, 512, InetAddress.getByName("127.0.0.1"));
-                  running = true;
-                  logger.log("SOCKS5 on 127.0.0.1:" + port);
-                  pool.submit(this::acceptLoop);
-              }
-
-              public void stop() {
-                  running = false;
-                  try { if (server != null) server.close(); } catch (IOException ignored) {}
-                  pool.shutdownNow();
-              }
-
-              private void acceptLoop() {
-                  while (running) {
-                      try {
-                          Socket client = server.accept();
-                          client.setTcpNoDelay(true);
-                          client.setSoTimeout(60000);
-                          pool.submit(() -> handle(client));
-                      } catch (IOException e) {
-                          if (running) logger.log("[ERR] accept: " + e.getMessage());
-                      }
-                  }
-              }
-
-              private void handle(Socket client) {
-                  long id = connId.incrementAndGet();
-                  Stats.totalConn.incrementAndGet();
-                  Socket remote = null;
-                  String targetHost = "?";
-                  int targetPort = 0;
-
-                  try {
-                      InputStream in = client.getInputStream();
-                      OutputStream out = client.getOutputStream();
-
-                      // SOCKS5 greeting
-                      int ver = in.read();
-                      if (ver != 5) { client.close(); Stats.failConn.incrementAndGet(); return; }
-                      int n = in.read();
-                      byte[] methods = new byte[n];
-                      readFull(in, methods);
-                      out.write(new byte[]{5, 0}); out.flush();
-
-                      // Request
-                      byte[] hdr = new byte[4];
-                      readFull(in, hdr);
-                      if (hdr[0] != 5 || hdr[1] != 1) { client.close(); Stats.failConn.incrementAndGet(); return; }
-
-                      int atype = hdr[3] & 0xFF;
-                      if (atype == 1) {
-                          byte[] a = new byte[4]; readFull(in, a);
-                          targetHost = InetAddress.getByAddress(a).getHostAddress();
-                      } else if (atype == 3) {
-                          int dl = in.read();
-                          byte[] d = new byte[dl]; readFull(in, d);
-                          targetHost = new String(d, StandardCharsets.UTF_8);
-                      } else if (atype == 4) {
-                          byte[] a = new byte[16]; readFull(in, a);
-                          targetHost = InetAddress.getByAddress(a).getHostAddress();
-                      } else {
-                          client.close(); Stats.failConn.incrementAndGet(); return;
-                      }
-                      targetPort = ((in.read() & 0xFF) << 8) | (in.read() & 0xFF);
-
-                      // Connect to target
-                      long t0 = System.currentTimeMillis();
-                      remote = new Socket();
-                      remote.setTcpNoDelay(true);
-                      remote.setSoTimeout(60000);
-                      try {
-                          remote.connect(new InetSocketAddress(targetHost, targetPort), 8000);
-                      } catch (SocketTimeoutException ste) {
-                          logger.log("#" + id + " " + targetHost + ":" + targetPort + " TIMEOUT (DPI block?)");
-                          out.write(new byte[]{5, 4, 0, 1, 0, 0, 0, 0, 0, 0}); out.flush();
-                          Stats.failConn.incrementAndGet();
-                          client.close();
-                          return;
-                      } catch (IOException ce) {
-                          logger.log("#" + id + " " + targetHost + ":" + targetPort + " connect fail: " + ce.getMessage());
-                          out.write(new byte[]{5, 5, 0, 1, 0, 0, 0, 0, 0, 0}); out.flush();
-                          Stats.failConn.incrementAndGet();
-                          client.close();
-                          return;
-                      }
-                      long connMs = System.currentTimeMillis() - t0;
-                      logger.log("#" + id + " -> " + targetHost + ":" + targetPort + " conn=" + connMs + "ms");
-
-                      // Success reply
-                      out.write(new byte[]{5, 0, 0, 1, 0, 0, 0, 0, 0, 0}); out.flush();
-
-                      // Proxy bidirectional
-                      final Socket fr = remote;
-                      final long fid = id;
-                      final int fp = targetPort;
-                      Future<Long> dn = pool.submit(() -> pipeDown(fr, client));
-                      long up = pipeUp(client, fr, fp == 443, fid);
-                      long dnBytes = 0;
-                      try { dnBytes = dn.get(120, TimeUnit.SECONDS); } catch (Exception ignored) {}
-
-                      Stats.okConn.incrementAndGet();
-                      logger.log("#" + id + " done up=" + up + " dn=" + dnBytes);
-
-                  } catch (Exception e) {
-                      logger.log("#" + id + " " + targetHost + " err: " + e.getMessage());
-                      Stats.failConn.incrementAndGet();
-                  } finally {
-                      try { client.close(); } catch (Exception ignored) {}
-                      try { if (remote != null) remote.close(); } catch (Exception ignored) {}
-                  }
-              }
-
-              private void readFull(InputStream in, byte[] buf) throws IOException {
-                  int off = 0;
-                  while (off < buf.length) {
-                      int r = in.read(buf, off, buf.length - off);
-                      if (r < 0) throw new EOFException();
-                      off += r;
-                  }
-              }
-
-              private long pipeUp(Socket from, Socket to, boolean fragmentFirst, long id) {
-                  long total = 0;
-                  try {
-                      InputStream in = from.getInputStream();
-                      OutputStream out = to.getOutputStream();
-                      byte[] buf = new byte[BUF_SIZE];
-                      boolean first = fragmentFirst && antiDpiEnabled;
-                      int len;
-                      while ((len = in.read(buf)) != -1) {
-                          if (first) {
-                              first = false;
-                              if (TlsParser.isTlsClientHello(buf, len)) {
-                                  TlsParser.SniInfo sni = TlsParser.parseClientHello(buf, len);
-                                  if (sni != null) {
-                                      out.write(buf, 0, sni.splitPos); out.flush();
-                                      out.write(buf, sni.splitPos, len - sni.splitPos); out.flush();
-                                      logger.log("#" + id + " TLS split sni=" + sni.hostname);
-                                      total += len;
-                                      Stats.bytesUp.addAndGet(len);
-                                      continue;
-                                  }
-                              }
-                          }
-                          out.write(buf, 0, len); out.flush();
-                          total += len;
-                          Stats.bytesUp.addAndGet(len);
-                      }
-                  } catch (IOException ignored) {
-                  } finally {
-                      try { from.close(); } catch (IOException ignored) {}
-                      try { to.close(); } catch (IOException ignored) {}
-                  }
-                  return total;
-              }
-
-              private long pipeDown(Socket from, Socket to) {
-                  long total = 0;
-                  try {
-                      InputStream in = from.getInputStream();
-                      OutputStream out = to.getOutputStream();
-                      byte[] buf = new byte[BUF_SIZE];
-                      int len;
-                      while ((len = in.read(buf)) != -1) {
-                          out.write(buf, 0, len); out.flush();
-                          total += len;
-                          Stats.bytesDown.addAndGet(len);
-                      }
-                  } catch (IOException ignored) {
-                  } finally {
-                      try { from.close(); } catch (IOException ignored) {}
-                      try { to.close(); } catch (IOException ignored) {}
-                  }
-                  return total;
-              }
-          }
-          ENDFILE
-
-          # ===== Tun2Socks runner =====
-          cat > app/src/main/java/com/antidpi/vpn/Tun2SocksRunner.java << 'ENDFILE'
-          package com.antidpi.vpn;
-
-          import android.content.Context;
-          import android.os.ParcelFileDescriptor;
-          import android.system.Os;
-          import android.system.OsConstants;
-          import android.util.Log;
-          import java.io.*;
-
-          /**
-           * Запускает hev-socks5-tunnel как нативный процесс.
-           * Передаёт ему TUN fd и конфиг.
-           */
-          public class Tun2SocksRunner {
-
-              private static final String TAG = "Tun2Socks";
-
-              private Process process;
-              private final Context ctx;
-              private final ShieldVpnService.LogListener logger;
-
-              public Tun2SocksRunner(Context ctx, ShieldVpnService.LogListener logger) {
-                  this.ctx = ctx;
-                  this.logger = logger;
-              }
-
-              public boolean start(ParcelFileDescriptor tunFd, int socksPort) {
-                  try {
-                      // Путь к бинарю (Android извлёк его из jniLibs в nativeLibraryDir)
-                      String binaryPath = ctx.getApplicationInfo().nativeLibraryDir + "/libhev-socks5-tunnel.so";
-                      File binary = new File(binaryPath);
-                      if (!binary.exists()) {
-                          ShieldVpnService.addLog("[FATAL] Binary not found: " + binaryPath);
-                          return false;
-                      }
-
-                      // Делаем исполняемым (на всякий случай)
-                      binary.setExecutable(true, false);
-
-                      // Создаём YAML-конфиг для tun2socks
-                      File configFile = new File(ctx.getCacheDir(), "tun2socks.yaml");
-                      String yaml =
-                          "tunnel:\n" +
-                          "  mtu: 1500\n" +
-                          "\n" +
-                          "socks5:\n" +
-                          "  port: " + socksPort + "\n" +
-                          "  address: 127.0.0.1\n" +
-                          "  udp: 'udp'\n" +
-                          "\n" +
-                          "misc:\n" +
-                          "  task-stack-size: 20480\n" +
-                          "  log-level: warn\n";
-                      try (FileWriter w = new FileWriter(configFile)) {
-                          w.write(yaml);
-                      }
-
-                      ShieldVpnService.addLog("Starting tun2socks: " + binaryPath);
-                      ShieldVpnService.addLog("Config: " + configFile.getAbsolutePath());
-
-                      // Запускаем процесс с передачей TUN fd
-                      ProcessBuilder pb = new ProcessBuilder(
-                          binaryPath,
-                          configFile.getAbsolutePath(),
-                          String.valueOf(tunFd.getFd())
-                      );
-                      pb.redirectErrorStream(true);
-                      process = pb.start();
-
-                      // Читаем stderr/stdout в отдельном потоке
-                      new Thread(() -> {
-                          try (BufferedReader r = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                              String line;
-                              while ((line = r.readLine()) != null) {
-                                  ShieldVpnService.addLog("[t2s] " + line);
-                              }
-                          } catch (IOException ignored) {}
-                      }).start();
-
-                      // Ждём чуть-чуть и проверяем что процесс жив
-                      Thread.sleep(500);
-                      if (!process.isAlive()) {
-                          ShieldVpnService.addLog("[FATAL] tun2socks died immediately, exit=" + process.exitValue());
-                          return false;
-                      }
-
-                      ShieldVpnService.addLog("tun2socks started (pid alive)");
-                      return true;
-
-                  } catch (Exception e) {
-                      ShieldVpnService.addLog("[FATAL] tun2socks start: " + e.getMessage());
-                      Log.e(TAG, "start", e);
-                      return false;
-                  }
-              }
-
-              public void stop() {
-                  if (process != null) {
-                      process.destroy();
-                      try { process.waitFor(); } catch (InterruptedException ignored) {}
-                      process = null;
-                  }
-              }
-          }
-          ENDFILE
-
-          # ===== VPN Service =====
-          cat > app/src/main/java/com/antidpi/vpn/ShieldVpnService.java << 'ENDFILE'
-          package com.antidpi.vpn;
-
-          import android.app.*;
-          import android.content.Intent;
-          import android.net.VpnService;
-          import android.os.Build;
-          import android.os.ParcelFileDescriptor;
-          import android.util.Log;
-          import java.util.ArrayList;
-          import java.util.List;
-
-          public class ShieldVpnService extends VpnService {
-
-              private static final String TAG = "ShieldVPN";
-              private static final String CHANNEL_ID = "shield_vpn";
-              private static final int NOTIFICATION_ID = 7;
-              private static final int SOCKS_PORT = 10808;
-
-              public static volatile boolean isRunning = false;
-              private static final List<String> logs = new ArrayList<>();
-              public static volatile LogListener listener;
-
-              public interface LogListener { void onLog(String msg); }
-
-              private ParcelFileDescriptor tunFd;
-              private Socks5Server socks;
-              private Tun2SocksRunner t2s;
-
-              public static synchronized void addLog(String msg) {
-                  String time = new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date());
-                  String line = time + " " + msg;
-                  logs.add(line);
-                  if (logs.size() > 500) logs.remove(0);
-                  if (listener != null) try { listener.onLog(line); } catch (Exception ignored) {}
-                  Log.d(TAG, line);
-              }
-
-              public static synchronized List<String> getLogs() { return new ArrayList<>(logs); }
-              public static synchronized void clearLogs() { logs.clear(); Stats.reset(); }
-
-              @Override
-              public int onStartCommand(Intent intent, int flags, int startId) {
-                  if (intent != null && "STOP".equals(intent.getAction())) {
-                      stopVpn();
-                      return START_NOT_STICKY;
-                  }
-                  showNotification();
-                  startVpn();
-                  return START_STICKY;
-              }
-
-              private void startVpn() {
-                  try {
-                      Stats.reset();
-                      addLog("=== ShieldVPN v5 starting ===");
-
-                      // 1. SOCKS5 сервер с anti-DPI
-                      addLog("Starting SOCKS5 on " + SOCKS_PORT);
-                      socks = new Socks5Server(SOCKS_PORT, ShieldVpnService::addLog);
-                      socks.start();
-
-                      // 2. TUN интерфейс
-                      addLog("Establishing TUN interface...");
-                      Builder b = new Builder();
-                      b.setSession("ShieldVPN")
-                       .setMtu(1500)
-                       .addAddress("10.233.7.1", 30)
-                       .addRoute("0.0.0.0", 0)
-                       .addRoute("::", 0)
-                       .addDnsServer("1.1.1.1")
-                       .addDnsServer("8.8.8.8");
-
-                      // Не проксируем сами себя
-                      try { b.addDisallowedApplication(getPackageName()); } catch (Exception ignored) {}
-
-                      tunFd = b.establish();
-                      if (tunFd == null) {
-                          addLog("[FATAL] TUN establish failed");
-                          stopVpn();
-                          return;
-                      }
-                      addLog("TUN fd=" + tunFd.getFd());
-
-                      // 3. tun2socks для перенаправления всего трафика в SOCKS5
-                      t2s = new Tun2SocksRunner(this, listener);
-                      if (!t2s.start(tunFd, SOCKS_PORT)) {
-                          addLog("[FATAL] tun2socks failed");
-                          stopVpn();
-                          return;
-                      }
-
-                      isRunning = true;
-                      addLog("VPN fully active!");
-                      addLog("All TCP -> SOCKS5 -> Anti-DPI -> Internet");
-                      addLog("Try YouTube/Telegram now");
-
-                  } catch (Exception e) {
-                      addLog("[FATAL] " + e.getMessage());
-                      Log.e(TAG, "start", e);
-                      stopVpn();
-                  }
-              }
-
-              private void stopVpn() {
-                  isRunning = false;
-                  addLog("Stopping...");
-                  if (t2s != null) { t2s.stop(); t2s = null; }
-                  if (socks != null) { socks.stop(); socks = null; }
-                  if (tunFd != null) {
-                      try { tunFd.close(); } catch (Exception ignored) {}
-                      tunFd = null;
-                  }
-                  addLog("Stopped. Total: " + Stats.totalConn.get() +
-                         " OK: " + Stats.okConn.get() +
-                         " Fail: " + Stats.failConn.get());
-                  stopForeground(true);
-                  stopSelf();
-              }
-
-              private void showNotification() {
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      NotificationChannel ch = new NotificationChannel(
-                          CHANNEL_ID, "ShieldVPN", NotificationManager.IMPORTANCE_LOW);
-                      NotificationManager nm = getSystemService(NotificationManager.class);
-                      if (nm != null) nm.createNotificationChannel(ch);
-                  }
-                  Intent stop = new Intent(this, ShieldVpnService.class);
-                  stop.setAction("STOP");
-                  PendingIntent pi = PendingIntent.getService(this, 0, stop,
-                      PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-
-                  Notification n = new Notification.Builder(this, CHANNEL_ID)
-                      .setContentTitle("ShieldVPN")
-                      .setContentText("Real tunnel + anti-DPI")
-                      .setSmallIcon(android.R.drawable.ic_menu_compass)
-                      .addAction(android.R.drawable.ic_delete, "Stop", pi)
-                      .setOngoing(true)
-                      .build();
-                  startForeground(NOTIFICATION_ID, n);
-              }
-
-              @Override public void onDestroy() { stopVpn(); super.onDestroy(); }
-              @Override public void onRevoke() { stopVpn(); super.onRevoke(); }
-          }
-          ENDFILE
-
-          # ===== MainActivity =====
-          cat > app/src/main/java/com/antidpi/vpn/MainActivity.java << 'ENDFILE'
-          package com.antidpi.vpn;
-
-          import android.app.Activity;
-          import android.content.Intent;
-          import android.net.VpnService;
-          import android.os.Bundle;
-          import android.os.Handler;
-          import android.os.Looper;
-          import android.widget.*;
-
-          public class MainActivity extends Activity {
-
-              private static final int VPN_REQ = 100;
-              private TextView statusText, logView, statsText;
-              private ScrollView logScroll;
-              private Button btnConnect, btnClear, btnMode;
-              private boolean connected = false;
-              private final Handler handler = new Handler(Looper.getMainLooper());
-
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-                  setContentView(R.layout.activity_main);
-
-                  statusText = findViewById(R.id.statusText);
-                  statsText = findViewById(R.id.statsText);
-                  logView = findViewById(R.id.logView);
-                  logScroll = findViewById(R.id.logScroll);
-                  btnConnect = findViewById(R.id.btnConnect);
-                  btnClear = findViewById(R.id.btnClear);
-                  btnMode = findViewById(R.id.btnMode);
-
-                  btnConnect.setOnClickListener(v -> {
-                      if (!ShieldVpnService.isRunning) startVpn();
-                      else stopVpn();
-                  });
-
-                  btnClear.setOnClickListener(v -> {
-                      ShieldVpnService.clearLogs();
-                      logView.setText("");
-                  });
-
-                  btnMode.setOnClickListener(v -> {
-                      Socks5Server.antiDpiEnabled = !Socks5Server.antiDpiEnabled;
-                      btnMode.setText("Anti-DPI: " + (Socks5Server.antiDpiEnabled ? "ON" : "OFF"));
-                  });
-
-                  ShieldVpnService.listener = msg -> handler.post(() -> {
-                      logView.append(msg + "\n");
-                      logScroll.post(() -> logScroll.fullScroll(ScrollView.FOCUS_DOWN));
-                  });
-
-                  for (String s : ShieldVpnService.getLogs()) logView.append(s + "\n");
-
-                  handler.postDelayed(new Runnable() {
-                      @Override public void run() {
-                          updateUi();
-                          handler.postDelayed(this, 1000);
-                      }
-                  }, 500);
-              }
-
-              private void startVpn() {
-                  logView.append("Requesting VPN permission...\n");
-                  Intent prep = VpnService.prepare(this);
-                  if (prep != null) startActivityForResult(prep, VPN_REQ);
-                  else launch();
-              }
-
-              private void stopVpn() {
-                  Intent i = new Intent(this, ShieldVpnService.class);
-                  i.setAction("STOP");
-                  startService(i);
-              }
-
-              @Override
-              protected void onActivityResult(int rc, int res, Intent data) {
-                  super.onActivityResult(rc, res, data);
-                  if (rc == VPN_REQ && res == RESULT_OK) launch();
-                  else if (rc == VPN_REQ) logView.append("Permission denied\n");
-              }
-
-              private void launch() {
-                  Intent i = new Intent(this, ShieldVpnService.class);
-                  startForegroundService(i);
-              }
-
-              private void updateUi() {
-                  boolean nowRunning = ShieldVpnService.isRunning;
-                  if (nowRunning != connected) {
-                      connected = nowRunning;
-                      if (connected) {
-                          statusText.setText("ON");
-                          statusText.setTextColor(getColor(R.color.green));
-                          btnConnect.setText("STOP");
-                          btnConnect.setBackgroundTintList(getColorStateList(R.color.red));
-                      } else {
-                          statusText.setText("OFF");
-                          statusText.setTextColor(getColor(R.color.red));
-                          btnConnect.setText("START");
-                          btnConnect.setBackgroundTintList(getColorStateList(R.color.accent));
-                      }
-                  }
-                  statsText.setText("Conn: " + Stats.totalConn.get() +
-                                   " | OK: " + Stats.okConn.get() +
-                                   " | Fail: " + Stats.failConn.get() +
-                                   " | UP " + (Stats.bytesUp.get() / 1024) + "KB" +
-                                   " DN " + (Stats.bytesDown.get() / 1024) + "KB");
-              }
-
-              @Override
-              protected void onDestroy() {
-                  ShieldVpnService.listener = null;
-                  super.onDestroy();
-              }
-          }
-          ENDFILE
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.2'
-
-      - name: Build APK
-        run: gradle assembleDebug --no-daemon --stacktrace
-
-      - name: Find APK files
-        if: always()
+      - name: Clean current repo (keep only .git and this workflow)
         run: |
-          echo "=== Looking for APK ==="
-          find . -name "*.apk" -type f 2>/dev/null
+          echo "=== Before cleanup ==="
+          ls -la
+
+          # Сохраняем .git (история) и текущий workflow на всякий случай
+          shopt -s extglob dotglob
+          # Удаляем всё кроме .git и .github
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.github' -exec rm -rf {} +
+          # Удаляем все workflows кроме текущего
+          find .github/workflows -type f ! -name 'clone_byedpi.yml' -delete 2>/dev/null || true
+
+          echo "=== After cleanup ==="
+          ls -la
+
+      - name: Clone ByeDPIAndroid with submodules
+        run: |
+          echo "=== Cloning ByeDPIAndroid ==="
+          git clone --recursive https://github.com/dovecoteescapee/ByeDPIAndroid.git /tmp/byedpi
+          cd /tmp/byedpi
+          echo "Latest commit:"
+          git log -1 --oneline
           echo ""
-          echo "=== jniLibs check ==="
-          ls -laR app/src/main/jniLibs/ 2>/dev/null
+          echo "Submodules:"
+          git submodule status
 
-      - name: Upload APK
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ShieldVPN_v5_RealTunnel
-          path: |
-            **/*.apk
-          if-no-files-found: warn
-          retention-days: 30
+      - name: Copy ByeDPI files to our repo
+        run: |
+          echo "=== Copying files ==="
+          # Копируем всё кроме .git
+          cd /tmp/byedpi
+          shopt -s dotglob
+          # Копируем все файлы и папки в корень нашего репо
+          for item in *; do
+            if [ "$item" != ".git" ]; then
+              cp -r "$item" "$GITHUB_WORKSPACE/"
+              echo "Copied: $item"
+            fi
+          done
+          # Копируем .gitmodules чтобы submodules работали
+          if [ -f ".gitmodules" ]; then
+            cp .gitmodules "$GITHUB_WORKSPACE/"
+            echo "Copied: .gitmodules"
+          fi
+          # Копируем .gitignore
+          if [ -f ".gitignore" ]; then
+            cp .gitignore "$GITHUB_WORKSPACE/"
+            echo "Copied: .gitignore"
+          fi
+
+          echo ""
+          echo "=== Result ==="
+          cd "$GITHUB_WORKSPACE"
+          ls -la
+
+      - name: Copy submodule contents (since .gitmodules won't auto-resolve)
+        run: |
+          # Найдём все submodules в исходном репо и скопируем их содержимое
+          cd /tmp/byedpi
+          if [ -f ".gitmodules" ]; then
+            echo "=== Processing submodules ==="
+            # Парсим пути submodules
+            git config --file .gitmodules --get-regexp path | awk '{print $2}' | while read submodule_path; do
+              if [ -d "$submodule_path" ] && [ "$(ls -A $submodule_path)" ]; then
+                echo "Copying submodule: $submodule_path"
+                # Создаём целевую папку и копируем содержимое
+                mkdir -p "$GITHUB_WORKSPACE/$submodule_path"
+                cp -r "$submodule_path/." "$GITHUB_WORKSPACE/$submodule_path/"
+                # Удаляем .git внутри submodule если есть
+                rm -rf "$GITHUB_WORKSPACE/$submodule_path/.git"
+              fi
+            done
+          fi
+
+          # Удаляем .gitmodules т.к. мы скопировали файлы напрямую
+          rm -f "$GITHUB_WORKSPACE/.gitmodules"
+          echo "Submodules expanded"
+
+      - name: Create build workflow
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.github/workflows"
+          cat > "$GITHUB_WORKSPACE/.github/workflows/build.yml" << 'WORKFLOW'
+          name: Build_APK
+          on: [push, workflow_dispatch]
+
+          jobs:
+            build:
+              runs-on: ubuntu-latest
+              steps:
+                - name: Checkout
+                  uses: actions/checkout@v4
+
+                - name: Set up JDK 17
+                  uses: actions/setup-java@v4
+                  with:
+                    java-version: '17'
+                    distribution: 'temurin'
+
+                - name: Setup Android SDK
+                  uses: android-actions/setup-android@v3
+
+                - name: Install NDK
+                  run: |
+                    NDK_VER="26.1.10909125"
+                    echo "Installing NDK $NDK_VER..."
+                    yes | sdkmanager "ndk;$NDK_VER" || true
+                    echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
+                    echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
+                    ls $ANDROID_HOME/ndk/
+
+                - name: Setup Gradle
+                  uses: gradle/actions/setup-gradle@v3
+
+                - name: Build APK
+                  run: |
+                    chmod +x gradlew
+                    ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -150
+
+                - name: Find APK
+                  if: always()
+                  run: |
+                    echo "=== APK files ==="
+                    find . -name "*.apk" -type f 2>/dev/null
+                    echo ""
+                    echo "=== Build outputs ==="
+                    ls -laR app/build/outputs/ 2>/dev/null || echo "no outputs"
+
+                - name: Upload APK
+                  if: always()
+                  uses: actions/upload-artifact@v4
+                  with:
+                    name: ByeDPI_APK
+                    path: |
+                      app/build/outputs/apk/**/*.apk
+                      **/*.apk
+                    if-no-files-found: warn
+                    retention-days: 30
+          WORKFLOW
+          echo "Build workflow created"
+          cat "$GITHUB_WORKSPACE/.github/workflows/build.yml" | head -10
+
+      - name: Commit and push
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          echo "=== Files to commit ==="
+          git status | head -30
+
+          git add -A
+          git commit -m "Clone ByeDPIAndroid and setup build workflow" || echo "Nothing to commit"
+          git push origin HEAD || git push origin main || git push origin master || echo "Push failed"
+
+          echo ""
+          echo "=== DONE ==="
+          echo "Now go to Actions tab and run 'Build_APK' workflow"
