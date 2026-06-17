@@ -10,3 +10,5 @@ macroquad = "0.4"
 package_name = "com.fast.cubic"
 label = "Cubic Battle"
 build_targets = ["aarch64-linux-android"]
+min_sdk_version = 21
+target_sdk_version = 30
