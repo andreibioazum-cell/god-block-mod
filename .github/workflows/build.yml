@@ -1,30 +1,46 @@
-name: INIT_ANDROID_PROJECT
+name: Build_Android_Raylib
 
 on:
+  push:
   workflow_dispatch:
 
 jobs:
-  init:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create Android Structure
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: yes | sdkmanager "ndk;25.1.8937393"
+
+      # ✅ Клонируем raylib
+      - name: Clone Raylib
+        run: git clone --depth 1 https://github.com/raysan5/raylib.git
+
+      # ✅ Создаём Android структуру
+      - name: Create Android Project Structure
         run: |
           mkdir -p app/src/main/cpp
           mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/java
 
-      - name: Add Raylib Submodule
-        run: |
-          git submodule add https://github.com/raysan5/raylib.git raylib
-          git submodule update --init --recursive
+      # ✅ Копируем твой main.c
+      - name: Move main.c
+        run: cp main.c app/src/main/cpp/main.c
 
+      # ✅ Создаём settings.gradle
       - name: Create settings.gradle
-        run: |
-          echo "include ':app'" > settings.gradle
+        run: echo "include ':app'" > settings.gradle
 
+      # ✅ Создаём root build.gradle
       - name: Create root build.gradle
         run: |
           cat <<EOF > build.gradle
@@ -39,7 +55,8 @@ jobs:
           }
           EOF
 
-      - name: Create app/build.gradle
+      # ✅ Создаём app/build.gradle
+      - name: Create app build.gradle
         run: |
           cat <<EOF > app/build.gradle
           plugins {
@@ -74,7 +91,8 @@ jobs:
           }
           EOF
 
-      - name: Create AndroidManifest.xml
+      # ✅ AndroidManifest.xml
+      - name: Create AndroidManifest
         run: |
           cat <<EOF > app/src/main/AndroidManifest.xml
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -82,22 +100,27 @@ jobs:
                   <activity android:name="android.app.NativeActivity"
                       android:configChanges="orientation|keyboardHidden|screenSize"
                       android:exported="true">
+
                       <meta-data
                           android:name="android.app.lib_name"
                           android:value="CubicBattle" />
+
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
+
                   </activity>
               </application>
           </manifest>
           EOF
 
+      # ✅ strings.xml
       - name: Create strings.xml
         run: |
           echo '<resources><string name="app_name">CubicBattle</string></resources>' > app/src/main/res/values/strings.xml
 
+      # ✅ CMakeLists.txt
       - name: Create CMakeLists.txt
         run: |
           cat <<EOF > app/src/main/cpp/CMakeLists.txt
@@ -121,52 +144,18 @@ jobs:
           )
           EOF
 
-      - name: Create main.c
+      # ✅ Генерируем Gradle Wrapper
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.5
+
+      # ✅ Сборка
+      - name: Build APK
         run: |
-          cat <<EOF > app/src/main/cpp/main.c
-          #include "raylib.h"
-          #include <math.h>
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
 
-          int main(void)
-          {
-              InitWindow(0, 0, "Cubic Battle");
-
-              Camera3D camera = { 0 };
-              camera.position = (Vector3){ 10.0f, 10.0f, 10.0f };
-              camera.target   = (Vector3){ 0.0f, 0.0f, 0.0f };
-              camera.up       = (Vector3){ 0.0f, 1.0f, 0.0f };
-              camera.fovy     = 45.0f;
-              camera.projection = CAMERA_PERSPECTIVE;
-
-              SetTargetFPS(60);
-
-              while (!WindowShouldClose())
-              {
-                  float t = GetTime();
-                  camera.position.x = 12.0f * cosf(t);
-                  camera.position.z = 12.0f * sinf(t);
-
-                  BeginDrawing();
-                      ClearBackground(SKYBLUE);
-                      BeginMode3D(camera);
-                          DrawGrid(20, 1.0f);
-                          DrawCube((Vector3){0,1,0}, 2,2,2, RED);
-                          DrawCubeWires((Vector3){0,1,0}, 2,2,2, MAROON);
-                      EndMode3D();
-                      DrawText("Cubic Battle", 20, 20, 30, BLACK);
-                      DrawFPS(20, 60);
-                  EndDrawing();
-              }
-
-              CloseWindow();
-              return 0;
-          }
-          EOF
-
-      - name: Commit Project
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add .
-          git commit -m "Auto generated Android Raylib project"
-          git push
+      # ✅ Выгружаем APK
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CubicBattle_APK
+          path: app/build/outputs/apk/debug/app-debug.apk
