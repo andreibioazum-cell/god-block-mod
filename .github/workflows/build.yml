@@ -28,17 +28,52 @@ jobs:
       - name: Install cargo-apk
         run: cargo install cargo-apk
 
-      - name: Build APK (debug)
-        run: cargo apk build
+      # ✅ Генерируем keystore
+      - name: Generate Release Keystore
+        run: |
+          keytool -genkeypair \
+            -keystore release.keystore \
+            -alias release \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=CubicBattle, OU=Dev, O=Fast, L=City, S=State, C=US"
 
+      # ✅ Обновляем Cargo.toml для release подписи
+      - name: Configure Release Signing
+        run: |
+          cat >> Cargo.toml << 'EOF'
+
+          [package.metadata.android.signing.release]
+          path = "release.keystore"
+          keystore_password = "android"
+          key_alias = "release"
+          key_password = "android"
+          EOF
+
+      # ✅ Собираем release APK
+      - name: Build Release APK
+        run: cargo apk build --release
+
+      # ✅ Находим APK
       - name: Find APK
         run: |
-          APK=$(find target -name "*.apk" | head -n 1)
+          APK=$(find target -name "*.apk" | grep release | head -n 1)
           echo "APK_PATH=$APK" >> $GITHUB_ENV
           ls -lh "$APK"
 
+      # ✅ Zipalign (опционально, но рекомендуется)
+      - name: Align APK
+        run: |
+          ZIPALIGN=$ANDROID_HOME/build-tools/30.0.3/zipalign
+          $ZIPALIGN -v 4 "$APK_PATH" aligned.apk
+          mv aligned.apk "$APK_PATH"
+
+      # ✅ Загружаем
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CubicBattle_APK
+          name: CubicBattle_Release_APK
           path: ${{ env.APK_PATH }}
