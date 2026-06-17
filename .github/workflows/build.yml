@@ -1,24 +1,38 @@
-      - name: Create CMakeLists.txt
+name: Build_Rust_Android_APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Android target
+        run: rustup target add aarch64-linux-android
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: yes | sdkmanager "ndk;25.1.8937393"
+
+      - name: Install cargo-apk
+        run: cargo install cargo-apk
+
+      - name: Build APK
         run: |
-          cat <<EOF > app/src/main/cpp/CMakeLists.txt
-          cmake_minimum_required(VERSION 3.10)
-          project(CubicBattle)
+          cargo apk build --release
 
-          set(CMAKE_C_STANDARD 99)
-
-          set(PLATFORM Android)
-          set(GRAPHICS GRAPHICS_API_OPENGL_ES2)
-
-          add_subdirectory(\${CMAKE_SOURCE_DIR}/../../../raylib raylib_build)
-
-          add_library(CubicBattle SHARED main.c)
-
-          target_link_libraries(CubicBattle
-              raylib
-              android
-              log
-              EGL
-              GLESv2
-              m
-          )
-          EOF
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CubicBattle_APK
+          path: target/android-artifacts/*.apk
