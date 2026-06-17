@@ -1,7 +1,10 @@
-[package]
+ [package]
 name = "cubic_battle"
 version = "0.1.0"
 edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
 
 [dependencies]
 macroquad = "0.4"
