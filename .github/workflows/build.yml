@@ -28,7 +28,11 @@ jobs:
       - name: Install cargo-apk
         run: cargo install cargo-apk
 
-      # Генерируем ключ
+      # ✅ Создаем папку assets, чтобы aapt не ругался
+      - name: Create Assets Dir
+        run: mkdir -p assets
+
+      # 1. Генерируем ключ для подписи
       - name: Generate Keystore
         run: |
           keytool -genkeypair -v \
@@ -41,11 +45,11 @@ jobs:
             -keypass my_password \
             -dname "CN=CubicBattle, OU=Dev, O=Fast, L=City, S=State, C=US"
 
-      # Сборка (теперь как bin, cargo-apk сам создаст нужный .so)
+      # 2. Сборка проекта
       - name: Build APK
         run: cargo apk build --release
 
-      # Выравнивание и подпись
+      # 3. Выравнивание и подпись вручную (самый надежный метод)
       - name: Align and Sign APK
         run: |
           RAW_APK=$(find target -name "*.apk" | head -n 1)
@@ -67,5 +71,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CubicBattle_Fixed_APK
+          name: CubicBattle_Ready_APK
           path: CubicBattle.apk
