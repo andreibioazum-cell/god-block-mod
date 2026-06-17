@@ -1,85 +1,172 @@
-name: Build_ByeDPI
-on: [workflow_dispatch]
+name: INIT_ANDROID_PROJECT
+
+on:
+  workflow_dispatch:
 
 jobs:
-  build:
+  init:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Clone ByeDPIAndroid
+      - uses: actions/checkout@v4
+
+      - name: Create Android Structure
         run: |
-          git clone --recursive https://github.com/dovecoteescapee/ByeDPIAndroid.git /tmp/byedpi
-          cd /tmp/byedpi
-          echo "Commit: $(git log -1 --oneline)"
-          git submodule status
-          echo ""
-          echo "=== Root files ==="
-          ls -la
-          echo ""
-          echo "=== app/src/main/java ==="
-          find app/src/main/java -maxdepth 3 -type d 2>/dev/null
+          mkdir -p app/src/main/cpp
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/java
 
-      - name: List all source files
+      - name: Add Raylib Submodule
         run: |
-          cd /tmp/byedpi
-          echo "=== All Kotlin files ==="
-          find . -name "*.kt" -type f 2>/dev/null
-          echo ""
-          echo "=== All Java files ==="
-          find . -name "*.java" -type f 2>/dev/null
-          echo ""
-          echo "=== All res files ==="
-          find app/src/main/res -type f -name "*.xml" 2>/dev/null | head -50
-          echo ""
-          echo "=== Settings ==="
-          cat settings.gradle* 2>/dev/null || cat settings.gradle.kts 2>/dev/null
-          echo ""
-          echo "=== Build files ==="
-          ls *.gradle* 2>/dev/null
-          cat build.gradle* 2>/dev/null | head -30
-          echo ""
-          cat app/build.gradle* 2>/dev/null | head -30
+          git submodule add https://github.com/raysan5/raylib.git raylib
+          git submodule update --init --recursive
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install NDK
+      - name: Create settings.gradle
         run: |
-          NDK_VER="26.1.10909125"
-          yes | sdkmanager --install "ndk;$NDK_VER" 2>&1 | tail -5
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
-          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VER" >> $GITHUB_ENV
-          ls $ANDROID_HOME/ndk/
+          echo "include ':app'" > settings.gradle
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-
-      - name: Build APK
-        working-directory: /tmp/byedpi
+      - name: Create root build.gradle
         run: |
-          chmod +x gradlew 2>/dev/null || true
-          echo "=== Building ==="
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tail -300
+          cat <<EOF > build.gradle
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.2.2'
+              }
+          }
+          allprojects {
+              repositories { google(); mavenCentral() }
+          }
+          EOF
 
-      - name: Find APK
-        if: always()
+      - name: Create app/build.gradle
         run: |
-          echo "=== APK files ==="
-          find /tmp/byedpi -name "*.apk" -type f 2>/dev/null
-          echo ""
-          echo "=== Outputs ==="
-          ls -laR /tmp/byedpi/app/build/outputs/ 2>/dev/null || echo "no outputs"
+          cat <<EOF > app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
 
-      - name: Upload APK
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ByeDPI_APK
-          path: /tmp/byedpi/app/build/outputs/apk/**/*.apk
-          if-no-files-found: warn
-          retention-days: 30
+          android {
+              namespace 'com.fast.cubic'
+              compileSdk 33
+
+              defaultConfig {
+                  applicationId "com.fast.cubic"
+                  minSdk 21
+                  targetSdk 33
+
+                  externalNativeBuild {
+                      cmake {
+                          arguments "-DPLATFORM=Android"
+                      }
+                  }
+
+                  ndk {
+                      abiFilters "arm64-v8a"
+                  }
+              }
+
+              externalNativeBuild {
+                  cmake {
+                      path "src/main/cpp/CMakeLists.txt"
+                  }
+              }
+          }
+          EOF
+
+      - name: Create AndroidManifest.xml
+        run: |
+          cat <<EOF > app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application android:label="CubicBattle" android:hasCode="false">
+                  <activity android:name="android.app.NativeActivity"
+                      android:configChanges="orientation|keyboardHidden|screenSize"
+                      android:exported="true">
+                      <meta-data
+                          android:name="android.app.lib_name"
+                          android:value="CubicBattle" />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+      - name: Create strings.xml
+        run: |
+          echo '<resources><string name="app_name">CubicBattle</string></resources>' > app/src/main/res/values/strings.xml
+
+      - name: Create CMakeLists.txt
+        run: |
+          cat <<EOF > app/src/main/cpp/CMakeLists.txt
+          cmake_minimum_required(VERSION 3.10)
+          project(CubicBattle)
+
+          set(PLATFORM Android)
+          set(GRAPHICS GRAPHICS_API_OPENGL_ES2)
+
+          add_subdirectory(\${CMAKE_SOURCE_DIR}/raylib)
+
+          add_library(CubicBattle SHARED main.c)
+
+          target_link_libraries(CubicBattle
+              raylib
+              android
+              log
+              EGL
+              GLESv2
+              m
+          )
+          EOF
+
+      - name: Create main.c
+        run: |
+          cat <<EOF > app/src/main/cpp/main.c
+          #include "raylib.h"
+          #include <math.h>
+
+          int main(void)
+          {
+              InitWindow(0, 0, "Cubic Battle");
+
+              Camera3D camera = { 0 };
+              camera.position = (Vector3){ 10.0f, 10.0f, 10.0f };
+              camera.target   = (Vector3){ 0.0f, 0.0f, 0.0f };
+              camera.up       = (Vector3){ 0.0f, 1.0f, 0.0f };
+              camera.fovy     = 45.0f;
+              camera.projection = CAMERA_PERSPECTIVE;
+
+              SetTargetFPS(60);
+
+              while (!WindowShouldClose())
+              {
+                  float t = GetTime();
+                  camera.position.x = 12.0f * cosf(t);
+                  camera.position.z = 12.0f * sinf(t);
+
+                  BeginDrawing();
+                      ClearBackground(SKYBLUE);
+                      BeginMode3D(camera);
+                          DrawGrid(20, 1.0f);
+                          DrawCube((Vector3){0,1,0}, 2,2,2, RED);
+                          DrawCubeWires((Vector3){0,1,0}, 2,2,2, MAROON);
+                      EndMode3D();
+                      DrawText("Cubic Battle", 20, 20, 30, BLACK);
+                      DrawFPS(20, 60);
+                  EndDrawing();
+              }
+
+              CloseWindow();
+              return 0;
+          }
+          EOF
+
+      - name: Commit Project
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add .
+          git commit -m "Auto generated Android Raylib project"
+          git push
