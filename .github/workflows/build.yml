@@ -28,7 +28,7 @@ jobs:
       - name: Install cargo-apk
         run: cargo install cargo-apk
 
-      # 1. Генерируем ключ для подписи
+      # 1. Генерируем ключ для подписи (Keystore)
       - name: Generate Keystore
         run: |
           keytool -genkeypair -v \
@@ -41,24 +41,36 @@ jobs:
             -keypass my_password \
             -dname "CN=CubicBattle, OU=Dev, O=Fast, L=City, S=State, C=US"
 
-      # 2. Собираем проект (cargo-apk сделает нам базовый APK)
+      # 2. Автоматически внедряем настройки подписи в Cargo.toml, чтобы cargo-apk не ругался
+      - name: Configure Cargo.toml for Release Signing
+        run: |
+          cat >> Cargo.toml << 'EOF'
+
+          [package.metadata.android.signing.release]
+          path = "release.keystore"
+          keystore_password = "my_password"
+          key_alias = "my_alias"
+          key_password = "my_password"
+          EOF
+
+      # 3. Собираем проект (теперь это пройдет успешно!)
       - name: Build Raw APK
         run: cargo apk build --release
 
-      # 3. Очищаем, выравниваем (zipalign) и подписываем (apksigner) вручную
+      # 4. Выравниваем (zipalign) и гарантированно подписываем (apksigner V2/V3) вручную
       - name: Align and Sign APK manually
         run: |
-          # Находим исходный APK, игнорируя уже выровненные/подписанные
+          # Находим созданный APK
           RAW_APK=$(find target -name "*.apk" | head -n 1)
           echo "Found raw APK: $RAW_APK"
           
           ZIPALIGN=$ANDROID_HOME/build-tools/30.0.3/zipalign
           APKSIGNER=$ANDROID_HOME/build-tools/30.0.3/apksigner
           
-          # Выравниваем APK (zipalign) — это критично для Android
+          # Очищаем старые артефакты, если они были, и выравниваем по границе 4 байт
           $ZIPALIGN -f -v 4 "$RAW_APK" aligned.apk
           
-          # Подписываем APK вручную сигнатурой V2/V3 (apksigner)
+          # Подписываем вручную утилитой apksigner (с поддержкой схем V2 и V3)
           $APKSIGNER sign \
             --ks release.keystore \
             --ks-key-alias my_alias \
@@ -67,10 +79,10 @@ jobs:
             --out CubicBattle.apk \
             aligned.apk
             
-          # Проверяем подпись (если этот шаг пройдет — APK установится везде)
+          # Проверяем подпись прямо в консоли GitHub Actions
           $APKSIGNER verify --verbose CubicBattle.apk
 
-      # 4. Загружаем готовый, рабочий APK
+      # 5. Выкладываем готовый, 100% рабочий APK
       - name: Upload Signed APK
         uses: actions/upload-artifact@v4
         with:
