@@ -10,7 +10,7 @@ pub fn main() void {
         .cleanup_cb = cleanup,
         .width = 1280,
         .height = 720,
-        .window_title = "Zig Cubic",
+        .window_title = "Zig Cubic Battle",
     });
 }
 
@@ -20,10 +20,12 @@ fn init() void {
 
 fn frame() void {
     var pass_action = sg.PassAction{};
+    // Цвет травы в майнкрафте: R: 124, G: 157, B: 52
     pass_action.colors[0] = .{ 
         .load_action = .CLEAR, 
-        .clear_value = .{ .r = 0.1, .g = 0.8, .b = 0.4, .a = 1.0 } 
+        .clear_value = .{ .r = 0.48, .g = 0.61, .b = 0.2, .a = 1.0 } 
     };
+    
     sg.beginPass(.{ .action = pass_action, .swapchain = sapp.swapchain() });
     sg.endPass();
     sg.commit();
