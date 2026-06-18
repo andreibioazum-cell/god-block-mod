@@ -1,75 +1,45 @@
-name: Build_Rust_Android_APK
+name: Zig_Native_Android_CI
 
-on:
-  push:
-  workflow_dispatch:
+on: [push, workflow_dispatch]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Add Android target
-        run: rustup target add aarch64-linux-android
+      
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: master
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK Components
+      - name: Install NDK
+        run: yes | sdkmanager "ndk;25.1.8937393"
+
+      # Zig умеет кросс-компилировать под Android одной командой!
+      - name: Build for Android (arm64)
         run: |
-          yes | sdkmanager "ndk;25.1.8937393" "platforms;android-30" "build-tools;30.0.3"
+          zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast
 
-      - name: Install cargo-apk
-        run: cargo install cargo-apk
-
-      # ✅ Создаем папку assets, чтобы aapt не ругался
-      - name: Create Assets Dir
-        run: mkdir -p assets
-
-      # 1. Генерируем ключ для подписи
-      - name: Generate Keystore
+      # Собираем APK через стандартные инструменты Android
+      - name: Package APK
         run: |
-          keytool -genkeypair -v \
-            -keystore release.keystore \
-            -alias my_alias \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass my_password \
-            -keypass my_password \
-            -dname "CN=CubicBattle, OU=Dev, O=Fast, L=City, S=State, C=US"
-
-      # 2. Сборка проекта
-      - name: Build APK
-        run: cargo apk build --release
-
-      # 3. Выравнивание и подпись вручную (самый надежный метод)
-      - name: Align and Sign APK
-        run: |
-          RAW_APK=$(find target -name "*.apk" | head -n 1)
-          ZIPALIGN=$ANDROID_HOME/build-tools/30.0.3/zipalign
-          APKSIGNER=$ANDROID_HOME/build-tools/30.0.3/apksigner
+          mkdir -p build/lib/arm64-v8a
+          cp zig-out/bin/CubicBattle build/lib/arm64-v8a/libCubicBattle.so
           
-          $ZIPALIGN -f -v 4 "$RAW_APK" aligned.apk
+          # Генерируем APK (используем aapt и apksigner)
+          AAPT=$ANDROID_HOME/build-tools/30.0.3/aapt
+          $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle.apk build/
           
-          $APKSIGNER sign \
-            --ks release.keystore \
-            --ks-key-alias my_alias \
-            --ks-pass pass:my_password \
-            --key-pass pass:my_password \
-            --out CubicBattle.apk \
-            aligned.apk
-            
-          $APKSIGNER verify CubicBattle.apk
+          # Подписываем отладочным ключом
+          keytool -genkeypair -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android,O=Android,C=US"
+          $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-signed.apk CubicBattle.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CubicBattle_Ready_APK
-          path: CubicBattle.apk
+          name: ZigMinecraft_APK
+          path: CubicBattle-signed.apk
