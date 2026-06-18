@@ -10,7 +10,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v1
         with:
-          version: 0.13.0
+          version: master
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -18,25 +18,28 @@ jobs:
       - name: Install NDK
         run: yes | sdkmanager "ndk;25.1.8937393"
 
-      - name: Fetch and Build
+      - name: Build and Fix Hash
         run: |
-          # Эта команда выведет правильный хеш, если текущий не совпадает
-          zig fetch https://github.com/floooh/sokol-zig/archive/refs/heads/master.tar.gz || true
-          zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast --summary all
+          # Если хеш снова не совпадет, эта команда покажет правильный
+          zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast --summary all || echo "HASH_MISMATCH_CHECK_LOGS"
 
       - name: Package APK
         run: |
           mkdir -p build/lib/arm64-v8a
-          if [ -f "zig-out/lib/libCubicBattle.so" ]; then
-            cp zig-out/lib/libCubicBattle.so build/lib/arm64-v8a/libCubicBattle.so
-            AAPT=$ANDROID_HOME/build-tools/30.0.3/aapt
-            $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle.apk build/
-            keytool -genkeypair -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android,O=Android,C=US"
-            $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-ready.apk CubicBattle.apk
-          else
-            echo "Library not found. Check Zig hash in 'Fetch and Build' step."
+          # Ищем скомпилированную библиотеку в zig-out
+          find zig-out -name "libCubicBattle.so" -exec cp {} build/lib/arm64-v8a/libCubicBattle.so \;
+          
+          if [ ! -f "build/lib/arm64-v8a/libCubicBattle.so" ]; then
+            echo "Error: Shared library not found!"
             exit 1
           fi
+
+          AAPT=$ANDROID_HOME/build-tools/30.0.3/aapt
+          $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle.apk build/
+          
+          # Генерация ключа и подпись APK
+          keytool -genkeypair -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android,O=Android,C=US"
+          $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-ready.apk CubicBattle.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
