@@ -8,10 +8,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      # Используем официальный способ установки Zig
       - name: Setup Zig
         uses: mlugg/setup-zig@v1
         with:
-          version: master
+          version: 0.13.0
+
+      - name: Verify Zig
+        run: zig version
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -19,27 +23,26 @@ jobs:
       - name: Install NDK
         run: yes | sdkmanager "ndk;25.1.8937393"
 
-      # Zig умеет кросс-компилировать под Android одной командой!
       - name: Build for Android (arm64)
         run: |
+          # Собираем как библиотеку под Android
           zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast
 
-      # Собираем APK через стандартные инструменты Android
       - name: Package APK
         run: |
           mkdir -p build/lib/arm64-v8a
-          cp zig-out/bin/CubicBattle build/lib/arm64-v8a/libCubicBattle.so
+          # Ищем скомпилированную либу и копируем ее
+          find zig-out/lib -name "libCubicBattle.so" -exec cp {} build/lib/arm64-v8a/libCubicBattle.so \;
           
-          # Генерируем APK (используем aapt и apksigner)
           AAPT=$ANDROID_HOME/build-tools/30.0.3/aapt
           $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle.apk build/
           
-          # Подписываем отладочным ключом
+          # Быстрая подпись (debug)
           keytool -genkeypair -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android,O=Android,C=US"
-          $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-signed.apk CubicBattle.apk
+          $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-ready.apk CubicBattle.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ZigMinecraft_APK
-          path: CubicBattle-signed.apk
+          path: CubicBattle-ready.apk
