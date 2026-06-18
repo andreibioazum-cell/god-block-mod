@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.zig.cubic">
+    <application android:label="Zig Cubic" android:hasCode="false">
+        <activity android:name="android.app.NativeActivity" android:configChanges="orientation|screenSize">
+            <meta-data android:name="android.app.lib_name" android:value="CubicBattle" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHer" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
