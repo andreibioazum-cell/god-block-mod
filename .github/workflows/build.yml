@@ -16,12 +16,13 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK
-        run: yes | sdkmanager "ndk;25.1.8937393"
+      - name: Install Android Components
+        run: |
+          # Устанавливаем NDK и Build-Tools версии 30.0.3
+          yes | sdkmanager "ndk;25.1.8937393" "platforms;android-30" "build-tools;30.0.3"
 
       - name: Build with Zig
         run: |
-          # Указываем путь к NDK явно для Zig
           export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.1.8937393
           zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast --summary all
         env:
@@ -30,17 +31,32 @@ jobs:
       - name: Package APK
         run: |
           mkdir -p build/lib/arm64-v8a
+          # Копируем скомпилированную библиотеку
           cp zig-out/lib/libCubicBattle.so build/lib/arm64-v8a/libCubicBattle.so
           
-          AAPT=$ANDROID_HOME/build-tools/30.0.3/aapt
-          $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle-unaligned.apk build/
-          $ANDROID_HOME/build-tools/30.0.3/zipalign -f -v 4 CubicBattle-unaligned.apk CubicBattle.apk
+          # Находим пути к инструментам динамически
+          BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* | tail -1)
+          AAPT=$BUILD_TOOLS_DIR/aapt
+          ZIPALIGN=$BUILD_TOOLS_DIR/zipalign
+          APKSIGNER=$BUILD_TOOLS_DIR/apksigner
+          PLATFORM_JAR=$ANDROID_HOME/platforms/android-30/android.jar
           
+          echo "Using Build Tools from: $BUILD_TOOLS_DIR"
+
+          # 1. Упаковка
+          $AAPT package -f -M AndroidManifest.xml -I $PLATFORM_JAR -F CubicBattle-unaligned.apk build/
+          
+          # 2. Выравнивание
+          $ZIPALIGN -f -v 4 CubicBattle-unaligned.apk CubicBattle-aligned.apk
+          
+          # 3. Генерация ключа (если нет)
           keytool -genkeypair -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android,O=Android,C=US"
-          $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-ready.apk CubicBattle.apk
+          
+          # 4. Подпись
+          $APKSIGNER sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-ready.apk CubicBattle-aligned.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ZigCubic_APK
+          name: ZigCubic_Final_APK
           path: CubicBattle-ready.apk
