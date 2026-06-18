@@ -11,25 +11,29 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Находим путь к NDK
+    // Получаем путь к NDK
     const ndk_home = b.graph.env_map.get("ANDROID_NDK_HOME") orelse "";
     if (ndk_home.len > 0) {
-        // Указываем sysroot — это корень всех системных файлов для Android в NDK
-        const sysroot = b.fmt("{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot", .{ndk_home});
-        lib.sysroot = sysroot;
-
-        // Добавляем путь к библиотекам именно для архитектуры aarch64 и API 30
-        const lib_path = b.fmt("{s}/usr/lib/aarch64-linux-android/30", .{sysroot});
-        lib.addLibraryPath(.{ .cwd_relative = lib_path });
+        const base = b.fmt("{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot", .{ndk_home});
+        
+        // Добавляем пути к заголовочным файлам (Headers)
+        lib.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{base}) });
+        lib.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/aarch64-linux-android", .{base}) });
+        
+        // Добавляем пути к библиотекам (Libraries)
+        lib.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib/aarch64-linux-android/30", .{base}) });
     }
 
-    // Линкуем графические библиотеки
+    // Линкуем системные библиотеки Android
     lib.linkSystemLibrary("GLESv2");
     lib.linkSystemLibrary("EGL");
     lib.linkSystemLibrary("android");
+    lib.linkSystemLibrary("log");
     
-    // Подключаем LibC (теперь он найдет её в sysroot)
-    lib.linkLibC();
+    // ВАЖНО: Вместо lib.linkLibC() линкуем 'c' как системную библиотеку NDK.
+    // Это обходит ошибку "libc not available".
+    lib.linkSystemLibrary("c");
+    lib.linkSystemLibrary("m");
 
     b.installArtifact(lib);
 }
