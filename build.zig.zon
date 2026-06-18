@@ -3,13 +3,14 @@
     .version = "0.1.0",
     .dependencies = .{
         .sokol = .{
-            .url = "https://github.com/floooh/sokol-zig/archive/refs/heads/master.tar.gz",
-            .hash = "1220404392097725514f77c8e76c0dfb6928e4e7e69f8c37d0c326071861e6878b7b",
+            .url = "https://github.com/floooh/sokol-zig/archive/9c7161b32d665b61f9d37a50519396361732955d.tar.gz",
+            .hash = "1220963579051061765c71d60f4e38e12d6a503522736142728955d71399f9361732",
         },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "main.zig",
+        "AndroidManifest.xml",
     },
 }
