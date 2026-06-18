@@ -19,7 +19,7 @@ const EGL_BLUE_SIZE: EGLint = 0x3024;
 const EGL_GREEN_SIZE: EGLint = 0x3023;
 const EGL_RED_SIZE: EGLint = 0x3022;
 
-// Объявляем функции (с использованием гибких указателей для C-совместимости)
+// Объявляем функции
 extern fn eglGetDisplay(display_id: EGLDisplay) EGLDisplay;
 extern fn eglInitialize(dpy: EGLDisplay, major: ?*EGLint, minor: ?*EGLint) i32;
 extern fn eglChooseConfig(dpy: EGLDisplay, attrib_list: [*]const EGLint, configs: ?[*]EGLConfig, config_size: EGLint, num_config: *EGLint) i32;
@@ -53,7 +53,7 @@ pub const ANativeActivityCallbacks = extern struct {
     onStop: ?*anyopaque = null,
     onDestroy: ?*anyopaque = null,
     onWindowFocusChanged: ?*anyopaque = null,
-    onNativeWindowCreated: ?*anyopaque = null, // Используем anyopaque для гибкости
+    onNativeWindowCreated: ?*anyopaque = null,
     onNativeWindowResized: ?*anyopaque = null,
     onNativeWindowRedrawNeeded: ?*anyopaque = null,
     onNativeWindowDestroyed: ?*anyopaque = null,
@@ -66,8 +66,8 @@ pub const ANativeActivityCallbacks = extern struct {
 
 // Точка входа
 pub export fn ANativeActivity_onCreate(activity: *ANativeActivity, _: ?*anyopaque, _: usize) void {
-    // Используем @ptrCast для приведения функции к типу, который ждет Android
-    activity.callbacks.onNativeWindowCreated = @ptrCast(&onWindowCreated);
+    // ИСПРАВЛЕНИЕ: Используем @constCast, как просил компилятор
+    activity.callbacks.onNativeWindowCreated = @ptrCast(@constCast(&onWindowCreated));
 }
 
 fn onWindowCreated(_: *ANativeActivity, window: ?*anyopaque) callconv(.C) void {
@@ -83,7 +83,6 @@ fn onWindowCreated(_: *ANativeActivity, window: ?*anyopaque) callconv(.C) void {
     var config: EGLConfig = undefined;
     var num_config: EGLint = undefined;
     
-    // Используем @ptrCast, чтобы передать указатель на одиночный конфиг как массив
     _ = eglChooseConfig(display, &config_attribs, @ptrCast(&config), 1, &num_config);
 
     const surface = eglCreateWindowSurface(display, config, window, null);
@@ -96,8 +95,8 @@ fn onWindowCreated(_: *ANativeActivity, window: ?*anyopaque) callconv(.C) void {
     while (true) {
         angle += 0.01;
         const r = @abs(@sin(angle));
-        // Устанавливаем цвет фона (плавное изменение)
-        glClearColor(r * 0.3, 0.5, 0.8, 1.0);
+        // Красивый градиент: от бирюзового к синему
+        glClearColor(0.1, r * 0.5, 0.8, 1.0);
         glClear(0x00004000 | 0x00000100); 
         _ = eglSwapBuffers(display, surface);
     }
