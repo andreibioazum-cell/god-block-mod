@@ -4,7 +4,7 @@
     .dependencies = .{
         .sokol = .{
             .url = "https://github.com/floooh/sokol-zig/archive/master.tar.gz",
-            .hash = "12206987c2f6d628883d6928e4e7e69f8c37d0c326071861e6878b7b257545367610",
+            .hash = "12206987c2f6d628883d6928e4e7e69f8c37d0c326071861e6878b7b25754536761073840e70390f0580459c77176189912d",
         },
     },
     .paths = .{ "" },
