@@ -23,7 +23,21 @@ jobs:
         run: |
           mkdir -p src
           
-          # 1. Создаем main.zig
+          # 1. Создаем минимальный build.zig.zon без хеша
+          cat <<EOF > build.zig.zon
+          .{
+              .name = "cubic_battle",
+              .version = "0.1.0",
+              .dependencies = .{},
+              .paths = .{ "" },
+          }
+          EOF
+
+          # 2. Автоматически скачиваем Sokol и прописываем его в проект
+          # Это решает проблему 404 и хешей навсегда
+          zig fetch --save=sokol https://github.com/floooh/sokol-zig/archive/refs/heads/master.tar.gz
+
+          # 3. Создаем main.zig
           cat <<EOF > src/main.zig
           const std = @import("std");
           const sokol = @import("sokol");
@@ -37,7 +51,7 @@ jobs:
                   .cleanup_cb = cleanup,
                   .width = 1280,
                   .height = 720,
-                  .window_title = "Zig Cubic Battle",
+                  .window_title = "Zig Cubic",
               });
           }
 
@@ -47,13 +61,11 @@ jobs:
 
           fn frame() void {
               var pass_action = sg.PassAction{};
-              // Цвет фона (Sky Blue)
               pass_action.colors[0] = .{ 
                   .load_action = .CLEAR, 
-                  .clear_value = .{ .r = 0.4, .g = 0.7, .b = 1.0, .a = 1.0 } 
+                  .clear_value = .{ .r = 0.1, .g = 0.6, .b = 0.9, .a = 1.0 } 
               };
               sg.beginPass(.{ .action = pass_action, .swapchain = sapp.swapchain() });
-              // Тут в будущем будет рендер вокселей
               sg.endPass();
               sg.commit();
           }
@@ -63,7 +75,7 @@ jobs:
           }
           EOF
 
-          # 2. Создаем build.zig
+          # 4. Создаем build.zig
           cat <<EOF > build.zig
           const std = @import("std");
 
@@ -88,22 +100,7 @@ jobs:
           }
           EOF
 
-          # 3. Создаем build.zig.zon
-          cat <<EOF > build.zig.zon
-          .{
-              .name = "cubic_battle",
-              .version = "0.1.0",
-              .dependencies = .{
-                  .sokol = .{
-                      .url = "https://github.com/floooh/sokol-zig/archive/refs/tags/0.13.0.tar.gz",
-                      .hash = "1220689725f77838568195841443d395048259404392097725514f77c8e76c0dfb69",
-                  },
-              },
-              .paths = .{ "" },
-          }
-          EOF
-
-          # 4. Создаем AndroidManifest.xml
+          # 5. Создаем AndroidManifest.xml
           cat <<EOF > AndroidManifest.xml
           <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.zig.cubic">
               <application android:label="Zig Cubic" android:hasCode="false">
@@ -120,23 +117,21 @@ jobs:
 
       - name: Build with Zig
         run: |
-          # Пытаемся собрать. Если хеш не совпадет, скрипт выведет ошибку, но мы увидим правильный хеш в логах.
           zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast --summary all
 
       - name: Package APK
         run: |
           mkdir -p build/lib/arm64-v8a
-          # Находим скомпилированную библиотеку .so
           find zig-out -name "libCubicBattle.so" -exec cp {} build/lib/arm64-v8a/libCubicBattle.so \;
           
-          # Упаковка через aapt
+          if [ ! -f "build/lib/arm64-v8a/libCubicBattle.so" ]; then
+            echo "Error: Shared library not found!"
+            exit 1
+          fi
+
           AAPT=$ANDROID_HOME/build-tools/30.0.3/aapt
           $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle-unaligned.apk build/
-          
-          # Выравнивание (zipalign)
           $ANDROID_HOME/build-tools/30.0.3/zipalign -f -v 4 CubicBattle-unaligned.apk CubicBattle-aligned.apk
-          
-          # Создание ключа (если его нет) и подпись
           keytool -genkeypair -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android,O=Android,C=US"
           $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-signed.apk CubicBattle-aligned.apk
 
