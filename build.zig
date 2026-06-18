@@ -6,16 +6,16 @@ pub fn build(b: *std.Build) void {
 
     const lib = b.addSharedLibrary(.{
         .name = "CubicBattle",
-        .root_source_file = b.path("main.zig"),
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const sokol = b.dependency("sokol", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    lib.root_module.addImport("sokol", sokol.module("sokol"));
+    // Линкуем системные библиотеки Android
+    lib.linkSystemLibrary("GLESv2");
+    lib.linkSystemLibrary("EGL");
+    lib.linkSystemLibrary("android");
+    lib.linkLibC();
 
     b.installArtifact(lib);
 }
