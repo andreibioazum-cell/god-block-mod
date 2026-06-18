@@ -11,29 +11,18 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Получаем путь к NDK
+    // Находим NDK только для путей линковки
     const ndk_home = b.graph.env_map.get("ANDROID_NDK_HOME") orelse "";
     if (ndk_home.len > 0) {
-        const base = b.fmt("{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot", .{ndk_home});
-        
-        // Добавляем пути к заголовочным файлам (Headers)
-        lib.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{base}) });
-        lib.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/aarch64-linux-android", .{base}) });
-        
-        // Добавляем пути к библиотекам (Libraries)
-        lib.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib/aarch64-linux-android/30", .{base}) });
+        const lib_path = b.fmt("{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/30", .{ndk_home});
+        lib.addLibraryPath(.{ .cwd_relative = lib_path });
     }
 
-    // Линкуем системные библиотеки Android
+    // Линкуем только то, что реально нужно
     lib.linkSystemLibrary("GLESv2");
     lib.linkSystemLibrary("EGL");
     lib.linkSystemLibrary("android");
     lib.linkSystemLibrary("log");
-    
-    // ВАЖНО: Вместо lib.linkLibC() линкуем 'c' как системную библиотеку NDK.
-    // Это обходит ошибку "libc not available".
-    lib.linkSystemLibrary("c");
-    lib.linkSystemLibrary("m");
 
     b.installArtifact(lib);
 }
