@@ -4,19 +4,19 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
+    // Для Android нам нужна SHARED библиотека (.so)
+    const lib = b.addSharedLibrary(.{
         .name = "CubicBattle",
-        .root_source_file = .{ .path = "main.zig" },
+        .root_source_file = b.path("main.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    // Zig сам скачивает зависимости из интернета
     const sokol = b.dependency("sokol", .{
         .target = target,
         .optimize = optimize,
     });
-    exe.root_module.addImport("sokol", sokol.module("sokol"));
+    lib.root_module.addImport("sokol", sokol.module("sokol"));
 
-    b.installArtifact(exe);
+    b.installArtifact(lib);
 }
