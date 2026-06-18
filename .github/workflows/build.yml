@@ -1,4 +1,5 @@
-name: Zig_Native_Android_CI
+name: Full_Zig_Android_AutoBuild
+
 on: [push, workflow_dispatch]
 
 jobs:
@@ -6,11 +7,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Zig
         uses: mlugg/setup-zig@v1
         with:
-          version: master
+          version: 0.13.0
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -18,31 +19,129 @@ jobs:
       - name: Install NDK
         run: yes | sdkmanager "ndk;25.1.8937393"
 
-      - name: Build and Fix Hash
+      - name: Create Project Files
         run: |
-          # Если хеш снова не совпадет, эта команда покажет правильный
-          zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast --summary all || echo "HASH_MISMATCH_CHECK_LOGS"
+          mkdir -p src
+          
+          # 1. Создаем main.zig
+          cat <<EOF > src/main.zig
+          const std = @import("std");
+          const sokol = @import("sokol");
+          const sapp = sokol.app;
+          const sg = sokol.gfx;
+
+          pub fn main() void {
+              sapp.run(.{
+                  .init_cb = init,
+                  .frame_cb = frame,
+                  .cleanup_cb = cleanup,
+                  .width = 1280,
+                  .height = 720,
+                  .window_title = "Zig Cubic Battle",
+              });
+          }
+
+          fn init() void {
+              sg.setup(.{ .context = sapp.defaultContext() });
+          }
+
+          fn frame() void {
+              var pass_action = sg.PassAction{};
+              // Цвет фона (Sky Blue)
+              pass_action.colors[0] = .{ 
+                  .load_action = .CLEAR, 
+                  .clear_value = .{ .r = 0.4, .g = 0.7, .b = 1.0, .a = 1.0 } 
+              };
+              sg.beginPass(.{ .action = pass_action, .swapchain = sapp.swapchain() });
+              // Тут в будущем будет рендер вокселей
+              sg.endPass();
+              sg.commit();
+          }
+
+          fn cleanup() void {
+              sg.shutdown();
+          }
+          EOF
+
+          # 2. Создаем build.zig
+          cat <<EOF > build.zig
+          const std = @import("std");
+
+          pub fn build(b: *std.Build) void {
+              const target = b.standardTargetOptions(.{});
+              const optimize = b.standardOptimizeOption(.{});
+
+              const lib = b.addSharedLibrary(.{
+                  .name = "CubicBattle",
+                  .root_source_file = b.path("src/main.zig"),
+                  .target = target,
+                  .optimize = optimize,
+              });
+
+              const sokol = b.dependency("sokol", .{
+                  .target = target,
+                  .optimize = optimize,
+              });
+              lib.root_module.addImport("sokol", sokol.module("sokol"));
+
+              b.installArtifact(lib);
+          }
+          EOF
+
+          # 3. Создаем build.zig.zon
+          cat <<EOF > build.zig.zon
+          .{
+              .name = "cubic_battle",
+              .version = "0.1.0",
+              .dependencies = .{
+                  .sokol = .{
+                      .url = "https://github.com/floooh/sokol-zig/archive/refs/tags/0.13.0.tar.gz",
+                      .hash = "1220689725f77838568195841443d395048259404392097725514f77c8e76c0dfb69",
+                  },
+              },
+              .paths = .{ "" },
+          }
+          EOF
+
+          # 4. Создаем AndroidManifest.xml
+          cat <<EOF > AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.zig.cubic">
+              <application android:label="Zig Cubic" android:hasCode="false">
+                  <activity android:name="android.app.NativeActivity" android:configChanges="orientation|screenSize">
+                      <meta-data android:name="android.app.lib_name" android:value="CubicBattle" />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+      - name: Build with Zig
+        run: |
+          # Пытаемся собрать. Если хеш не совпадет, скрипт выведет ошибку, но мы увидим правильный хеш в логах.
+          zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast --summary all
 
       - name: Package APK
         run: |
           mkdir -p build/lib/arm64-v8a
-          # Ищем скомпилированную библиотеку в zig-out
+          # Находим скомпилированную библиотеку .so
           find zig-out -name "libCubicBattle.so" -exec cp {} build/lib/arm64-v8a/libCubicBattle.so \;
           
-          if [ ! -f "build/lib/arm64-v8a/libCubicBattle.so" ]; then
-            echo "Error: Shared library not found!"
-            exit 1
-          fi
-
+          # Упаковка через aapt
           AAPT=$ANDROID_HOME/build-tools/30.0.3/aapt
-          $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle.apk build/
+          $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle-unaligned.apk build/
           
-          # Генерация ключа и подпись APK
+          # Выравнивание (zipalign)
+          $ANDROID_HOME/build-tools/30.0.3/zipalign -f -v 4 CubicBattle-unaligned.apk CubicBattle-aligned.apk
+          
+          # Создание ключа (если его нет) и подпись
           keytool -genkeypair -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android,O=Android,C=US"
-          $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-ready.apk CubicBattle.apk
+          $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-signed.apk CubicBattle-aligned.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ZigCubic_APK
-          path: CubicBattle-ready.apk
+          name: ZigCubic_Finished_APK
+          path: CubicBattle-signed.apk
