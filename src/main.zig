@@ -8,15 +8,17 @@ const c = @cImport({
     @cInclude("android/log.h");
 });
 
-const LOG_TAG = "ZigCubic";
-
 // Точка входа для Android NativeActivity
 pub export fn ANativeActivity_onCreate(activity: *c.ANativeActivity, saved_state: ?*anyopaque, saved_state_size: usize) void {
-    _ = saved_state; _ = saved_state_size;
+    _ = saved_state; 
+    _ = saved_state_size;
     activity.callbacks.*.onNativeWindowCreated = onWindowCreated;
 }
 
 fn onWindowCreated(activity: ?*c.ANativeActivity, window: ?*c.ANativeWindow) callconv(.C) void {
+    // ИСПРАВЛЕНИЕ: Помечаем параметр как неиспользуемый, чтобы Zig не ругался
+    _ = activity; 
+
     const display = c.eglGetDisplay(c.EGL_DEFAULT_DISPLAY);
     _ = c.eglInitialize(display, null, null);
 
@@ -40,12 +42,10 @@ fn onWindowCreated(activity: ?*c.ANativeActivity, window: ?*c.ANativeWindow) cal
     var angle: f32 = 0;
     while (true) {
         angle += 0.01;
-        // Цвет неба (динамически меняется)
         const r = @abs(@sin(angle));
+        // Плавная смена цвета фона
         c.glClearColor(r, 0.6, 0.9, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT | c.GL_DEPTH_BUFFER_BIT);
-        
-        // Тут будет рендер твоих вокселей через glDrawArrays
         
         _ = c.eglSwapBuffers(display, surface);
     }
