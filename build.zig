@@ -11,24 +11,24 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Получаем путь к NDK из переменной окружения
-    const ndk_path = b.graph.env_map.get("ANDROID_NDK_HOME") orelse "";
-    if (ndk_path.len > 0) {
-        // Путь к системным библиотекам Android внутри NDK
-        const sysroot_include = b.fmt("{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include", .{ndk_path});
-        const sysroot_lib = b.fmt("{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/30", .{ndk_path});
-        
-        lib.addIncludePath(.{ .cwd_relative = sysroot_include });
-        lib.addLibraryPath(.{ .cwd_relative = sysroot_lib });
-        
-        // Добавляем специфичные для Android инклуды
-        const android_include = b.fmt("{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/aarch64-linux-android", .{ndk_path});
-        lib.addIncludePath(.{ .cwd_relative = android_include });
+    // Находим путь к NDK
+    const ndk_home = b.graph.env_map.get("ANDROID_NDK_HOME") orelse "";
+    if (ndk_home.len > 0) {
+        // Указываем sysroot — это корень всех системных файлов для Android в NDK
+        const sysroot = b.fmt("{s}/toolchains/llvm/prebuilt/linux-x86_64/sysroot", .{ndk_home});
+        lib.sysroot = sysroot;
+
+        // Добавляем путь к библиотекам именно для архитектуры aarch64 и API 30
+        const lib_path = b.fmt("{s}/usr/lib/aarch64-linux-android/30", .{sysroot});
+        lib.addLibraryPath(.{ .cwd_relative = lib_path });
     }
 
+    // Линкуем графические библиотеки
     lib.linkSystemLibrary("GLESv2");
     lib.linkSystemLibrary("EGL");
     lib.linkSystemLibrary("android");
+    
+    // Подключаем LibC (теперь он найдет её в sysroot)
     lib.linkLibC();
 
     b.installArtifact(lib);
