@@ -1,6 +1,6 @@
 const std = @import("std");
 
-// Типы для EGL и OpenGL (просто числа и указатели)
+// Типы для EGL и OpenGL
 const EGLDisplay = ?*anyopaque;
 const EGLConfig = ?*anyopaque;
 const EGLContext = ?*anyopaque;
@@ -15,8 +15,11 @@ const EGL_RENDERABLE_TYPE: EGLint = 0x3040;
 const EGL_OPENGL_ES2_BIT: EGLint = 0x0004;
 const EGL_NONE: EGLint = 0x3038;
 const EGL_CONTEXT_CLIENT_VERSION: EGLint = 0x3098;
+const EGL_BLUE_SIZE: EGLint = 0x3024;
+const EGL_GREEN_SIZE: EGLint = 0x3023;
+const EGL_RED_SIZE: EGLint = 0x3022;
 
-// Объявляем функции как extern (они лежат в .so библиотеках Android)
+// Объявляем функции (с использованием гибких указателей для C-совместимости)
 extern fn eglGetDisplay(display_id: EGLDisplay) EGLDisplay;
 extern fn eglInitialize(dpy: EGLDisplay, major: ?*EGLint, minor: ?*EGLint) i32;
 extern fn eglChooseConfig(dpy: EGLDisplay, attrib_list: [*]const EGLint, configs: ?[*]EGLConfig, config_size: EGLint, num_config: *EGLint) i32;
@@ -28,7 +31,7 @@ extern fn eglSwapBuffers(dpy: EGLDisplay, surface: EGLSurface) i32;
 extern fn glClearColor(r: f32, g: f32, b: f32, a: f32) void;
 extern fn glClear(mask: u32) void;
 
-// Структуры Android Native Activity
+// Структуры Android NDK
 pub const ANativeActivity = extern struct {
     callbacks: *ANativeActivityCallbacks,
     vm: ?*anyopaque,
@@ -50,7 +53,7 @@ pub const ANativeActivityCallbacks = extern struct {
     onStop: ?*anyopaque = null,
     onDestroy: ?*anyopaque = null,
     onWindowFocusChanged: ?*anyopaque = null,
-    onNativeWindowCreated: ?*fn (activity: *ANativeActivity, window: ?*anyopaque) callconv(.C) void = null,
+    onNativeWindowCreated: ?*anyopaque = null, // Используем anyopaque для гибкости
     onNativeWindowResized: ?*anyopaque = null,
     onNativeWindowRedrawNeeded: ?*anyopaque = null,
     onNativeWindowDestroyed: ?*anyopaque = null,
@@ -63,17 +66,25 @@ pub const ANativeActivityCallbacks = extern struct {
 
 // Точка входа
 pub export fn ANativeActivity_onCreate(activity: *ANativeActivity, _: ?*anyopaque, _: usize) void {
-    activity.callbacks.onNativeWindowCreated = onWindowCreated;
+    // Используем @ptrCast для приведения функции к типу, который ждет Android
+    activity.callbacks.onNativeWindowCreated = @ptrCast(&onWindowCreated);
 }
 
 fn onWindowCreated(_: *ANativeActivity, window: ?*anyopaque) callconv(.C) void {
     const display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     _ = eglInitialize(display, null, null);
 
-    const config_attribs = [_]EGLint{ EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, EGL_NONE };
+    const config_attribs = [_]EGLint{ 
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, 
+        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
+        EGL_NONE 
+    };
+    
     var config: EGLConfig = undefined;
     var num_config: EGLint = undefined;
-    _ = eglChooseConfig(display, &config_attribs, &config, 1, &num_config);
+    
+    // Используем @ptrCast, чтобы передать указатель на одиночный конфиг как массив
+    _ = eglChooseConfig(display, &config_attribs, @ptrCast(&config), 1, &num_config);
 
     const surface = eglCreateWindowSurface(display, config, window, null);
     const context_attribs = [_]EGLint{ EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
@@ -85,8 +96,9 @@ fn onWindowCreated(_: *ANativeActivity, window: ?*anyopaque) callconv(.C) void {
     while (true) {
         angle += 0.01;
         const r = @abs(@sin(angle));
-        glClearColor(r, 0.4, 0.7, 1.0);
-        glClear(0x00004000 | 0x00000100); // COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT
+        // Устанавливаем цвет фона (плавное изменение)
+        glClearColor(r * 0.3, 0.5, 0.8, 1.0);
+        glClear(0x00004000 | 0x00000100); 
         _ = eglSwapBuffers(display, surface);
     }
 }
