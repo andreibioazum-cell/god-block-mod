@@ -18,27 +18,27 @@ jobs:
       - name: Install NDK
         run: yes | sdkmanager "ndk;25.1.8937393"
 
-      - name: Build and Fetch Hash
+      - name: Fetch and Build
         run: |
-          # Если хеш неверный, Zig выведет: "found: 1220..."
-          zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast || echo "CHECK_HASH_ABOVE"
+          # Эта команда выведет правильный хеш, если текущий не совпадает
+          zig fetch https://github.com/floooh/sokol-zig/archive/refs/heads/master.tar.gz || true
+          zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast --summary all
 
       - name: Package APK
         run: |
           mkdir -p build/lib/arm64-v8a
-          # Если билд прошел успешно, копируем либу
-          if [ -d "zig-out/lib" ]; then
+          if [ -f "zig-out/lib/libCubicBattle.so" ]; then
             cp zig-out/lib/libCubicBattle.so build/lib/arm64-v8a/libCubicBattle.so
             AAPT=$ANDROID_HOME/build-tools/30.0.3/aapt
             $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle.apk build/
             keytool -genkeypair -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android,O=Android,C=US"
             $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-ready.apk CubicBattle.apk
           else
-            echo "Build failed, check Zig hash in logs"
+            echo "Library not found. Check Zig hash in 'Fetch and Build' step."
             exit 1
           fi
 
-      - name: Upload
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ZigCubic_APK
