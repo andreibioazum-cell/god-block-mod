@@ -4,7 +4,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Для Android нам нужна SHARED библиотека (.so)
+    // Создаем общую библиотеку для Android
     const lib = b.addSharedLibrary(.{
         .name = "CubicBattle",
         .root_source_file = b.path("main.zig"),
@@ -12,11 +12,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const sokol = b.dependency("sokol", .{
+    // Подключаем Sokol
+    const dep_sokol = b.dependency("sokol", .{
         .target = target,
         .optimize = optimize,
     });
-    lib.root_module.addImport("sokol", sokol.module("sokol"));
+    lib.root_module.addImport("sokol", dep_sokol.module("sokol"));
 
+    // Это нужно, чтобы артефакт попал в zig-out/lib
     b.installArtifact(lib);
 }
