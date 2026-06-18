@@ -21,21 +21,21 @@ jobs:
 
       - name: Build with Zig
         run: |
+          # Указываем путь к NDK явно для Zig
+          export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.1.8937393
           zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast --summary all
+        env:
+          ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.1.8937393
 
       - name: Package APK
         run: |
           mkdir -p build/lib/arm64-v8a
           cp zig-out/lib/libCubicBattle.so build/lib/arm64-v8a/libCubicBattle.so
           
-          # Упаковка
           AAPT=$ANDROID_HOME/build-tools/30.0.3/aapt
           $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle-unaligned.apk build/
-          
-          # Выравнивание
           $ANDROID_HOME/build-tools/30.0.3/zipalign -f -v 4 CubicBattle-unaligned.apk CubicBattle.apk
           
-          # Подпись
           keytool -genkeypair -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android,O=Android,C=US"
           $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-ready.apk CubicBattle.apk
 
