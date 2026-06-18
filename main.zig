@@ -22,9 +22,8 @@ fn frame() void {
     var pass_action = sg.PassAction{};
     pass_action.colors[0] = .{ 
         .load_action = .CLEAR, 
-        .clear_value = .{ .r = 0.1, .g = 0.5, .b = 0.9, .a = 1.0 } 
+        .clear_value = .{ .r = 0.1, .g = 0.8, .b = 0.4, .a = 1.0 } 
     };
-    
     sg.beginPass(.{ .action = pass_action, .swapchain = sapp.swapchain() });
     sg.endPass();
     sg.commit();
