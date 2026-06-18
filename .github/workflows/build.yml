@@ -1,5 +1,4 @@
 name: Zig_Native_Android_CI
-
 on: [push, workflow_dispatch]
 
 jobs:
@@ -19,26 +18,28 @@ jobs:
       - name: Install NDK
         run: yes | sdkmanager "ndk;25.1.8937393"
 
-      - name: Build for Android (arm64)
+      - name: Build and Fetch Hash
         run: |
-          # Пытаемся собрать. Если хеш неверный, Zig выведет нужный в консоль.
-          zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast --summary all
+          # Если хеш неверный, Zig выведет: "found: 1220..."
+          zig build -Dtarget=aarch64-linux-android -Doptimize=ReleaseFast || echo "CHECK_HASH_ABOVE"
 
       - name: Package APK
         run: |
           mkdir -p build/lib/arm64-v8a
-          # Копируем .so файл. Имя должно совпадать с метаданными в манифесте.
-          cp zig-out/lib/libCubicBattle.so build/lib/arm64-v8a/libCubicBattle.so
-          
-          AAPT=$ANDROID_HOME/build-tools/30.0.3/aapt
-          $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle.apk build/
-          
-          # Генерация ключа и подпись
-          keytool -genkeypair -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android,O=Android,C=US"
-          $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-signed.apk CubicBattle.apk
+          # Если билд прошел успешно, копируем либу
+          if [ -d "zig-out/lib" ]; then
+            cp zig-out/lib/libCubicBattle.so build/lib/arm64-v8a/libCubicBattle.so
+            AAPT=$ANDROID_HOME/build-tools/30.0.3/aapt
+            $AAPT package -f -M AndroidManifest.xml -I $ANDROID_HOME/platforms/android-30/android.jar -F CubicBattle.apk build/
+            keytool -genkeypair -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android,O=Android,C=US"
+            $ANDROID_HOME/build-tools/30.0.3/apksigner sign --ks debug.keystore --ks-pass pass:android --out CubicBattle-ready.apk CubicBattle.apk
+          else
+            echo "Build failed, check Zig hash in logs"
+            exit 1
+          fi
 
-      - name: Upload APK
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: ZigCubic_APK
-          path: CubicBattle-signed.apk
+          path: CubicBattle-ready.apk
