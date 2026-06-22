@@ -1,4 +1,4 @@
-name: TasksAI DeepSeek Omni Fix
+name: TasksAI Omni Pro Final
 on:
   push:
     branches: [ main ]
@@ -22,7 +22,7 @@ jobs:
       - name: Create Folders
         run: mkdir -p app/src/main/cpp app/src/main/java/com/aetherai app/src/main/res/layout app/src/main/res/drawable app/src/main/res/values
 
-      - name: Create C++ Core (Omni-Logic Engine)
+      - name: Create C++ Core (Sync Logic Engine)
         run: |
           cat > app/src/main/cpp/ggml_core.h << 'EOF'
           #ifndef GGML_CORE_H
@@ -48,12 +48,13 @@ jobs:
               }
 
               std::string inference(const std::vector<int>& query) {
-                  if (stream.empty() || query.empty()) return "Загрузите DATA для начала.";
+                  if (stream.empty()) return "ОШИБКА: База данных пуста. Загрузите файл еще раз.";
+                  if (query.empty()) return "Я не узнаю ни одного слова в вашем вопросе. Попробуйте по-другому.";
 
                   int best_pos = -1;
                   float max_score = 0;
 
-                  for (size_t i = 0; i < stream.size() - 20; i++) {
+                  for (size_t i = 0; i < stream.size() - 10; i++) {
                       if (id_to_word[stream[i]] == "u:") {
                           float current_score = 0;
                           for (size_t j = i + 1; j < i + 40 && j < stream.size(); j++) {
@@ -69,26 +70,27 @@ jobs:
                       }
                   }
 
-                  if (best_pos == -1) {
+                  if (best_pos == -1 || max_score < 0.1f) {
+                      // Совсем слабый поиск по одному слову
                       for (int q_token : query) {
                           for (size_t i = 0; i < stream.size(); i++) {
-                              if (stream[i] == q_token) { best_pos = (int)i; max_score = 0.1f; break; }
+                              if (stream[i] == q_token) { best_pos = (int)i; break; }
                           }
                           if (best_pos != -1) break;
                       }
                   }
 
-                  if (best_pos == -1) return "К сожалению, в моих знаниях нет ответа на этот вопрос.";
+                  if (best_pos == -1) return "В моих знаниях нет ничего похожего на ваш запрос.";
 
                   int start_idx = -1;
-                  for (size_t i = best_pos; i < best_pos + 120 && i < stream.size(); i++) {
+                  for (size_t i = best_pos; i < best_pos + 100 && i < stream.size(); i++) {
                       if (id_to_word[stream[i]] == "a:") { start_idx = i + 1; break; }
                   }
 
-                  if (start_idx == -1) return "Я нашел информацию, но ответ не размечен тегом a: в файле.";
+                  if (start_idx == -1) return "Тема найдена, но блок ответа 'a:' в файле отсутствует.";
 
                   std::string res = "";
-                  for (size_t i = start_idx; i < start_idx + 250 && i < stream.size(); i++) {
+                  for (size_t i = start_idx; i < start_idx + 300 && i < stream.size(); i++) {
                       std::string w = id_to_word[stream[i]];
                       if (w == "u:") break; 
                       res += w + " ";
@@ -103,31 +105,42 @@ jobs:
           #include <jni.h>
           #include <string>
           #include <vector>
-          #include <sstream>   // КРИТИЧЕСКИЙ ФИКС: Добавлен отсутствующий инклуд
+          #include <sstream>
           #include <algorithm>
           #include "ggml_core.h"
 
           static OmniEngine engine;
 
-          extern "C" JNIEXPORT jstring JNICALL Java_com_aetherai_AIEngine_init(JNIEnv* env, jobject) {
-              return env->NewStringUTF("OK");
+          std::string clean_word(std::string s) {
+              if (s == "u:" || s == "a:") return s;
+              std::string r = "";
+              for(char c : s) {
+                  unsigned char u = (unsigned char)c;
+                  if (u < 128) {
+                      if(!ispunct(u)) r += (char)tolower(u);
+                  } else {
+                      r += c; // Сохраняем кириллицу
+                  }
+              }
+              return r;
           }
 
-          std::string clean_word(std::string s) {
-              std::string r = "";
-              for(char c : s) { if(!ispunct(c)) r += (char)tolower(c); }
-              return r;
+          extern "C" JNIEXPORT jstring JNICALL Java_com_aetherai_AIEngine_init(JNIEnv* env, jobject) {
+              return env->NewStringUTF("OK");
           }
 
           extern "C" JNIEXPORT void JNICALL Java_com_aetherai_AIEngine_addText(JNIEnv* env, jobject, jstring text) {
               const char* c = env->GetStringUTFChars(text, nullptr);
               std::stringstream ss(c); std::string w;
               while(ss >> w) {
-                  std::string word = w;
-                  std::transform(word.begin(), word.end(), word.begin(), ::tolower);
-                  engine.stream.push_back(engine.get_id(word));
+                  std::string cl = clean_word(w);
+                  if(!cl.empty()) engine.stream.push_back(engine.get_id(cl));
               }
               env->ReleaseStringUTFChars(text, c);
+          }
+
+          extern "C" JNIEXPORT jint JNICALL Java_com_aetherai_AIEngine_getTokens(JNIEnv* env, jobject) {
+              return (jint)engine.stream.size();
           }
 
           extern "C" JNIEXPORT jstring JNICALL Java_com_aetherai_AIEngine_generate(JNIEnv* env, jobject, jstring input) {
@@ -151,28 +164,24 @@ jobs:
           target_link_libraries(aetherai log)
           EOF
 
-      - name: Create UI Assets (Dark Theme)
+      - name: Create UI Layout
         run: |
+          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
+          <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#0D1117">
+          <LinearLayout android:id="@+id/h" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="12dp" android:background="#161B22">
+          <TextView android:id="@+id/st" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="TasksAI: Waiting..." android:textColor="#58A6FF" android:textStyle="bold"/>
+          <Button android:id="@+id/btn_l" android:layout_width="wrap_content" android:layout_height="38dp" android:text="DATA" android:textSize="10sp" android:backgroundTint="#21262D"/></LinearLayout>
+          <ScrollView android:id="@+id/scr" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_below="@id/h" android:layout_above="@+id/iA">
+          <LinearLayout android:id="@+id/chat" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="12dp"/></ScrollView>
+          <LinearLayout android:id="@+id/iA" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_alignParentBottom="true" android:padding="10dp" android:background="#0D1117">
+          <EditText android:id="@+id/input" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Напиши вопрос..." android:textColor="#FFF" android:background="@null" android:textColorHint="#484F58"/>
+          <ImageButton android:id="@+id/send" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_menu_send" android:background="@null" android:tint="#58A6FF"/></LinearLayout></RelativeLayout>
+          EOF
           cat > app/src/main/res/drawable/bg_user.xml << 'EOF'
           <shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#21262D"/><corners android:radius="12dp"/></shape>
           EOF
           cat > app/src/main/res/drawable/bg_ai.xml << 'EOF'
           <shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#161B22"/><corners android:radius="12dp"/><stroke android:width="1dp" android:color="#30363D"/></shape>
-          EOF
-
-      - name: Create Layout
-        run: |
-          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
-          <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#0D1117">
-          <LinearLayout android:id="@+id/h" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="12dp" android:background="#161B22">
-          <TextView android:id="@+id/st" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="DeepSeek Omni-Engine" android:textColor="#58A6FF" android:textStyle="bold"/>
-          <Button android:id="@+id/btn_l" android:layout_width="wrap_content" android:layout_height="38dp" android:text="DATA" android:textSize="10sp" android:backgroundTint="#21262D"/>
-          <Button android:id="@+id/btn_t" android:layout_width="wrap_content" android:layout_height="38dp" android:text="ACTIVE" android:textSize="10sp" android:backgroundTint="#238636" android:layout_marginLeft="5dp"/></LinearLayout>
-          <ScrollView android:id="@+id/scr" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_below="@id/h" android:layout_above="@+id/iA">
-          <LinearLayout android:id="@+id/chat" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="12dp"/></ScrollView>
-          <LinearLayout android:id="@+id/iA" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_alignParentBottom="true" android:padding="10dp" android:background="#0D1117">
-          <EditText android:id="@+id/input" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Задай вопрос..." android:textColor="#FFF" android:background="@null" android:textColorHint="#484F58"/>
-          <ImageButton android:id="@+id/send" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_menu_send" android:background="@null" android:tint="#58A6FF"/></LinearLayout></RelativeLayout>
           EOF
 
       - name: Create Java MainActivity
@@ -181,7 +190,7 @@ jobs:
           package com.aetherai;
           public class AIEngine { static { System.loadLibrary("aetherai"); }
           public native String init(); public native void addText(String t);
-          public native String generate(String input); }
+          public native int getTokens(); public native String generate(String input); }
           EOF
           cat > app/src/main/java/com/aetherai/MainActivity.java << 'EOF'
           package com.aetherai;
@@ -191,7 +200,6 @@ jobs:
           import android.view.View;
           import android.widget.*;
           import android.content.Intent;
-          import android.graphics.Typeface;
           import java.io.*;
           public class MainActivity extends Activity {
           AIEngine ai = new AIEngine(); LinearLayout chat; EditText input; TextView st; ScrollView scroll;
@@ -200,18 +208,14 @@ jobs:
           chat=findViewById(R.id.chat); input=findViewById(R.id.input); st=findViewById(R.id.st); scroll=findViewById(R.id.scr);
           new Thread(() -> ai.init()).start();
           findViewById(R.id.btn_l).setOnClickListener(v -> { Intent it = new Intent(Intent.ACTION_GET_CONTENT); it.setType("text/plain"); startActivityForResult(it, 1); });
-          findViewById(R.id.btn_t).setOnClickListener(v -> { st.setText("Engine: Online"); });
           findViewById(R.id.send).setOnClickListener(v -> { String q = input.getText().toString(); if(q.isEmpty()) return;
           addMsg("YOU", q, true); new Thread(() -> { String a = ai.generate(q); runOnUiThread(() -> addMsg("AI", a, false)); }).start(); input.setText(""); }); }
           private void addMsg(String s, String t, boolean u) { 
           if(!u && t.contains("<thought>")) {
               try {
                   int s1 = t.indexOf("<thought>")+9, s2 = t.indexOf("</thought>");
-                  if(s2 > s1) {
-                      TextView tvT = new TextView(this); tvT.setText("Thinking: " + t.substring(s1, s2));
-                      tvT.setTextColor(0xFF8B949E); tvT.setTextSize(11); tvT.setTypeface(null, Typeface.ITALIC);
-                      chat.addView(tvT); t = t.substring(s2+10);
-                  }
+                  TextView tvT = new TextView(this); tvT.setText("Thought: " + t.substring(s1, s2));
+                  tvT.setTextColor(0xFF8B949E); tvT.setTextSize(11); chat.addView(tvT); t = t.substring(s2+10);
               } catch(Exception e) {}
           }
           TextView tv = new TextView(this); tv.setText(t); tv.setTextColor(0xFFC9D1D9); tv.setPadding(25, 18, 25, 18);
@@ -220,11 +224,12 @@ jobs:
           tv.setLayoutParams(lp); chat.addView(tv); scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN)); }
           @Override protected void onActivityResult(int req, int res, Intent d) { if (d != null && d.getData() != null) { new Thread(() -> { try {
           InputStream is = getContentResolver().openInputStream(d.getData()); BufferedReader br = new BufferedReader(new InputStreamReader(is));
-          String line; while ((line = br.readLine()) != null) ai.addText(line + " "); is.close(); runOnUiThread(() -> st.setText("Знания загружены"));
+          String line; while ((line = br.readLine()) != null) ai.addText(line + " "); is.close();
+          runOnUiThread(() -> st.setText("Knowledge: " + ai.getTokens() + " tokens"));
           } catch (Exception e) {} }).start(); } } }
           EOF
 
-      - name: Build Project Configs
+      - name: Final Build
         run: |
           cat > build.gradle << 'EOF'
           buildscript { repositories { google(); mavenCentral() }; dependencies { classpath 'com.android.tools.build:gradle:8.2.2' } }
@@ -239,7 +244,7 @@ jobs:
           EOF
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-          <application android:label="DeepSeek Omni" android:largeHeap="true" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+          <application android:label="TasksAI Omni" android:largeHeap="true" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
           <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
           <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
           </activity></application></manifest>
@@ -251,8 +256,8 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: TasksAI-Omni-Final-Fix
+          name: TasksAI-Omni-Stable
           path: app/build/outputs/apk/debug/app-debug.apk
