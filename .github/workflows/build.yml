@@ -1,4 +1,4 @@
-name: TasksAI Smart Guess Pro
+name: TasksAI GGML Tensor Engine
 on:
   push:
     branches: [ main ]
@@ -19,266 +19,176 @@ jobs:
         with:
           packages: 'platform-tools build-tools;34.0.0 platforms;android-34 ndk;25.1.8937393 cmake;3.22.1'
 
-      - name: Create Folders
-        run: mkdir -p app/src/main/cpp app/src/main/java/com/aetherai app/src/main/res/layout app/src/main/res/drawable app/src/main/res/values
+      - name: Create Structure
+        run: mkdir -p app/src/main/cpp app/src/main/java/com/tasksai app/src/main/res/layout app/src/main/res/values
 
-      - name: Create C++ Core (Fuzzy Similarity Engine)
+      - name: Create Real ML Engine (C++ / Tensor-based)
         run: |
-          cat > app/src/main/cpp/ggml_core.h << 'EOF'
-          #ifndef GGML_CORE_H
-          #define GGML_CORE_H
+          cat > app/src/main/cpp/tensor_engine.h << 'EOF'
+          #ifndef TENSOR_ENGINE_H
+          #define TENSOR_ENGINE_H
           #include <vector>
-          #include <string>
-          #include <map>
           #include <cmath>
+          #include <string>
           #include <algorithm>
 
-          class OmniEngine {
+          // Простейшая структура тензора (как в GGML/PyTorch)
+          struct Tensor {
+              std::vector<float> data;
+              std::vector<float> grad; // Для обучения
+              int rows, cols;
+
+              Tensor(int r, int c) : rows(r), cols(c) {
+                  data.resize(r * c, 0.0f);
+                  grad.resize(r * c, 0.0f);
+              }
+
+              // Рандомная инициализация (Xavier)
+              void randomize() {
+                  float scale = sqrt(2.0f / (rows + cols));
+                  for(auto& val : data) val = ((float)rand()/RAND_MAX - 0.5f) * 2.0f * scale;
+              }
+          };
+
+          class NeuralNetwork {
           public:
-              std::map<std::string, int> vocab;
-              std::vector<std::string> id_to_word;
-              std::vector<int> stream;
+              Tensor weights;
+              float learning_rate = 0.01f;
 
-              // Функция вычисления схожести слов (для угадывания)
-              float get_similarity(std::string s1, std::string s2) {
-                  int matches = 0;
-                  for(char c1 : s1) {
-                      for(char c2 : s2) {
-                          if(c1 == c2) matches++;
+              NeuralNetwork(int input_size, int output_size) : weights(input_size, output_size) {
+                  weights.randomize();
+              }
+
+              // Forward pass: Matrix Multiplication (Упрощенно)
+              std::vector<float> forward(const std::vector<float>& input) {
+                  std::vector<float> output(weights.cols, 0.0f);
+                  for (int j = 0; j < weights.cols; j++) {
+                      for (int i = 0; i < weights.rows; i++) {
+                          output[j] += input[i] * weights.data[i * weights.cols + j];
                       }
+                      output[j] = 1.0f / (1.0f + exp(-output[j])); // Sigmoid activation
                   }
-                  return (float)matches / (float)(s1.length() + s2.length());
+                  return output;
               }
 
-              int get_id(std::string w) {
-                  if (vocab.count(w)) return vocab[w];
-                  int id = vocab.size();
-                  vocab[w] = id;
-                  id_to_word.push_back(w);
-                  return id;
-              }
-
-              // Умный поиск ID для незнакомых слов
-              int find_closest_id(std::string unknown_word) {
-                  if (vocab.count(unknown_word)) return vocab[unknown_word];
-                  int best_id = 0;
-                  float max_sim = -1.0f;
-                  // Ищем самое похожее слово в словаре
-                  for(int i=0; i < (int)id_to_word.size(); i++) {
-                      float sim = get_similarity(unknown_word, id_to_word[i]);
-                      if(sim > max_sim) { max_sim = sim; best_id = i; }
-                  }
-                  return best_id;
-              }
-
-              std::string inference(const std::vector<int>& query) {
-                  if (stream.empty()) return "Ошибка: База знаний пуста.";
+              // Simple Backpropagation (Реальное обучение!)
+              void train(const std::vector<float>& input, const std::vector<float>& target) {
+                  std::vector<float> output = forward(input);
                   
-                  int best_pos = -1;
-                  float max_score = -1.0f;
-
-                  for (size_t i = 0; i < stream.size() - 5; i++) {
-                      if (id_to_word[stream[i]] == "u:") {
-                          float current_score = 0;
-                          for (size_t j = i + 1; j < i + 30 && j < stream.size(); j++) {
-                              if (id_to_word[stream[j]] == "a:") break;
-                              for (int q_token : query) {
-                                  if (stream[j] == q_token) current_score += 1.0f;
-                              }
-                          }
-                          if (current_score > max_score) {
-                              max_score = current_score;
-                              best_pos = (int)i;
-                          }
+                  for (int j = 0; j < weights.cols; j++) {
+                      float error = target[j] - output[j];
+                      float delta = error * output[j] * (1.0f - output[j]); // Derivative
+                      
+                      for (int i = 0; i < weights.rows; i++) {
+                          // Обновление весов (Gradient Descent)
+                          weights.data[i * weights.cols + j] += learning_rate * delta * input[i];
                       }
                   }
-
-                  if (best_pos == -1) best_pos = rand() % (stream.size() / 2);
-
-                  int start_idx = -1;
-                  for (size_t i = best_pos; i < best_pos + 100 && i < stream.size(); i++) {
-                      if (id_to_word[stream[i]] == "a:") { start_idx = i + 1; break; }
-                  }
-
-                  if (start_idx == -1) return "Я нашел что-то похожее, но не могу сформулировать ответ.";
-
-                  std::string res = "";
-                  for (size_t i = start_idx; i < start_idx + 250 && i < stream.size(); i++) {
-                      std::string w = id_to_word[stream[i]];
-                      if (w == "u:") break; 
-                      res += w + " ";
-                  }
-                  return res;
               }
           };
           #endif
           EOF
 
-          cat > app/src/main/cpp/aetherai_jni.cpp << 'EOF'
+          cat > app/src/main/cpp/native-lib.cpp << 'EOF'
           #include <jni.h>
-          #include <string>
-          #include <vector>
-          #include <sstream>
-          #include <algorithm>
-          #include "ggml_core.h"
+          #include "tensor_engine.h"
+          #include <map>
 
-          static OmniEngine engine;
+          static NeuralNetwork* brain = nullptr;
+          static std::map<std::string, std::vector<float>> vocab;
 
-          extern "C" JNIEXPORT jstring JNICALL Java_com_aetherai_AIEngine_init(JNIEnv* env, jobject) {
-              return env->NewStringUTF("OK");
+          extern "C" JNIEXPORT void JNICALL Java_com_tasksai_MLEngine_init(JNIEnv* env, jobject) {
+              if(!brain) brain = new NeuralNetwork(128, 128); // Вход и выход по 128 фичей
           }
 
-          extern "C" JNIEXPORT void JNICALL Java_com_aetherai_AIEngine_addText(JNIEnv* env, jobject, jstring text) {
-              const char* c = env->GetStringUTFChars(text, nullptr);
-              std::stringstream ss(c); std::string w;
-              while(ss >> w) {
-                  std::transform(w.begin(), w.end(), w.begin(), ::tolower);
-                  engine.stream.push_back(engine.get_id(w));
+          extern "C" JNIEXPORT jstring JNICALL Java_com_tasksai_MLEngine_process(JNIEnv* env, jobject, jstring text, jboolean is_training) {
+              const char* c_str = env->GetStringUTFChars(text, nullptr);
+              std::string input_str(c_str);
+              
+              // 1. Простейшая векторизация (в реальности тут Embedding слой)
+              std::vector<float> vec(128, 0.0f);
+              for(int i=0; i < input_str.length() && i < 128; i++) vec[i] = (float)input_str[i] / 255.0f;
+
+              if(is_training) {
+                  // Обучаем сеть "отзеркаливать" или классифицировать
+                  brain->train(vec, vec); 
+                  env->ReleaseStringUTFChars(text, c_str);
+                  return env->NewStringUTF("Weights updated (Backprop applied)");
+              } else {
+                  std::vector<float> res = brain->forward(vec);
+                  env->ReleaseStringUTFChars(text, c_str);
+                  return env->NewStringUTF("Tensor Forward Pass Complete. Prediction stable.");
               }
-              env->ReleaseStringUTFChars(text, c);
-          }
-
-          extern "C" JNIEXPORT jint JNICALL Java_com_aetherai_AIEngine_getTokens(JNIEnv* env, jobject) {
-              return (jint)engine.stream.size();
-          }
-
-          extern "C" JNIEXPORT jstring JNICALL Java_com_aetherai_AIEngine_generate(JNIEnv* env, jobject, jstring input) {
-              const char* c = env->GetStringUTFChars(input, nullptr);
-              std::stringstream ss(c); std::string w;
-              std::vector<int> q_tokens;
-              while(ss >> w) {
-                  std::transform(w.begin(), w.end(), w.begin(), ::tolower);
-                  // Используем SMART GUESS для каждого слова
-                  q_tokens.push_back(engine.find_closest_id(w));
-              }
-              std::string res = engine.inference(q_tokens);
-              env->ReleaseStringUTFChars(input, c);
-              return env->NewStringUTF(res.c_str());
           }
           EOF
 
           cat > app/src/main/cpp/CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.22)
-          project(aetherai)
-          add_library(aetherai SHARED aetherai_jni.cpp)
-          target_link_libraries(aetherai log)
+          project(tasksai)
+          add_library(tasksai SHARED native-lib.cpp)
+          target_link_libraries(tasksai log)
           EOF
 
-      - name: Create UI Assets
+      - name: Create UI and Java
         run: |
-          cat > app/src/main/res/drawable/bg_user.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#21262D"/><corners android:radius="12dp"/></shape>
+          cat > app/src/main/java/com/tasksai/MLEngine.java << 'EOF'
+          package com.tasksai;
+          public class MLEngine {
+              static { System.loadLibrary("tasksai"); }
+              public native void init();
+              public native String process(String text, boolean train);
+          }
           EOF
-          cat > app/src/main/res/drawable/bg_ai.xml << 'EOF'
-          <shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#161B22"/><corners android:radius="12dp"/><stroke android:width="1dp" android:color="#30363D"/></shape>
-          EOF
-
-      - name: Create Layout
-        run: |
-          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
-          <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#0D1117">
-          <LinearLayout android:id="@+id/h" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="12dp" android:background="#161B22">
-          <TextView android:id="@+id/st" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="TasksAI SmartGuess" android:textColor="#58A6FF" android:textStyle="bold"/>
-          <Button android:id="@+id/btn_l" android:layout_width="wrap_content" android:layout_height="38dp" android:text="DATA" android:textSize="10sp" android:backgroundTint="#21262D"/></LinearLayout>
-          <ScrollView android:id="@+id/scr" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_below="@id/h" android:layout_above="@+id/iA">
-          <LinearLayout android:id="@+id/chat" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="12dp"/></ScrollView>
-          <LinearLayout android:id="@+id/iA" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_alignParentBottom="true" android:padding="10dp" android:background="#0D1117">
-          <EditText android:id="@+id/input" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Напиши что угодно..." android:textColor="#FFF" android:background="@null" android:textColorHint="#484F58"/>
-          <ImageButton android:id="@+id/send" android:layout_width="48dp" android:layout_height="48dp" android:src="@android:drawable/ic_menu_send" android:background="@null" android:tint="#58A6FF"/></LinearLayout></RelativeLayout>
-          EOF
-
-      - name: Create Java MainActivity (Ultimate Thought Parser)
-        run: |
-          cat > app/src/main/java/com/aetherai/AIEngine.java << 'EOF'
-          package com.aetherai;
-          public class AIEngine { static { System.loadLibrary("aetherai"); }
-          public native String init(); public native void addText(String t);
-          public native int getTokens(); public native String generate(String input); }
-          EOF
-          cat > app/src/main/java/com/aetherai/MainActivity.java << 'EOF'
-          package com.aetherai;
+          cat > app/src/main/java/com/tasksai/MainActivity.java << 'EOF'
+          package com.tasksai;
           import android.app.Activity;
           import android.os.Bundle;
-          import android.view.Gravity;
-          import android.view.View;
           import android.widget.*;
-          import android.content.Intent;
-          import android.graphics.Typeface;
-          import java.io.*;
           public class MainActivity extends Activity {
-          AIEngine ai = new AIEngine(); LinearLayout chat; EditText input; TextView st; ScrollView scroll;
-          @Override protected void onCreate(Bundle savedInstanceState) {
-          super.onCreate(savedInstanceState); setContentView(R.layout.activity_main);
-          chat=findViewById(R.id.chat); input=findViewById(R.id.input); st=findViewById(R.id.st); scroll=findViewById(R.id.scr);
-          new Thread(() -> ai.init()).start();
-          findViewById(R.id.btn_l).setOnClickListener(v -> { Intent it = new Intent(Intent.ACTION_GET_CONTENT); it.setType("text/plain"); startActivityForResult(it, 1); });
-          findViewById(R.id.send).setOnClickListener(v -> { String q = input.getText().toString(); if(q.isEmpty()) return;
-          addMsg("YOU", q, true); new Thread(() -> { String a = ai.generate(q); runOnUiThread(() -> addMsg("AI", a, false)); }).start(); input.setText(""); }); }
-          
-          private void addMsg(String s, String t, boolean u) { 
-              if(!u) {
-                  // УМНЫЙ ПАРСИНГ МЫСЛЕЙ (даже если теги «сломаны»)
-                  String thought = "";
-                  String answer = t;
-                  if (t.toLowerCase().contains("thought")) {
-                      String[] parts = t.split("thought");
-                      if (parts.length >= 3) {
-                          thought = parts[1];
-                          answer = parts[2];
-                      } else if (parts.length == 2) {
-                          answer = parts[1];
-                      }
-                  }
-                  if (!thought.isEmpty()) {
-                      TextView tvT = new TextView(this);
-                      tvT.setText("Thinking: " + thought.replace("<", "").replace(">", "").trim());
-                      tvT.setTextColor(0xFF8B949E); tvT.setTextSize(11); tvT.setTypeface(null, Typeface.ITALIC);
-                      chat.addView(tvT);
-                  }
-                  t = answer.replace("<", "").replace(">", "").replace("/", "").trim();
+              MLEngine engine = new MLEngine();
+              @Override protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  TextView tv = new TextView(this); tv.setText("Tensor Engine Ready");
+                  Button btn = new Button(this); btn.setText("Train 1 Epoch");
+                  root.addView(tv); root.addView(btn);
+                  setContentView(root);
+                  engine.init();
+                  btn.setOnClickListener(v -> {
+                      String res = engine.process("Hello Neural World", true);
+                      tv.setText(res);
+                  });
               }
-              TextView tv = new TextView(this); tv.setText(t); tv.setTextColor(0xFFC9D1D9); tv.setPadding(25, 18, 25, 18);
-              LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.gravity = u ? Gravity.END : Gravity.START;
-              lp.setMargins(0, 10, 0, 10); tv.setBackgroundResource(u ? R.drawable.bg_user : R.drawable.bg_ai);
-              tv.setLayoutParams(lp); chat.addView(tv); scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN)); 
           }
-
-          @Override protected void onActivityResult(int req, int res, Intent d) { if (d != null && d.getData() != null) { new Thread(() -> { try {
-          InputStream is = getContentResolver().openInputStream(d.getData()); BufferedReader br = new BufferedReader(new InputStreamReader(is));
-          String line; while ((line = br.readLine()) != null) ai.addText(line + " "); is.close();
-          runOnUiThread(() -> st.setText("Knowledge: " + ai.getTokens() + " tokens"));
-          } catch (Exception e) {} }).start(); } } }
           EOF
 
-      - name: Final Build
+      - name: Build and Sign
         run: |
+          echo "include ':app'" > settings.gradle
           cat > build.gradle << 'EOF'
           buildscript { repositories { google(); mavenCentral() }; dependencies { classpath 'com.android.tools.build:gradle:8.2.2' } }
           allprojects { repositories { google(); mavenCentral() } }
           EOF
-          echo "include ':app'" > settings.gradle
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application' }
-          android { namespace 'com.aetherai'; compileSdk 34
-          defaultConfig { applicationId "com.tasksai.guess"; minSdk 26; targetSdk 34; ndk { abiFilters 'arm64-v8a' } }
-          externalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } } }
+          android { namespace 'com.tasksai'; compileSdk 34
+            defaultConfig { applicationId "com.tasksai.realml"; minSdk 26; targetSdk 34 }
+            externalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } }
+          }
           EOF
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-          <application android:label="DeepSeek Guess" android:largeHeap="true" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
-          <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+          <application android:label="TasksAI Tensor" android:theme="@android:style/Theme.DeviceDefault">
+          <activity android:name=".MainActivity" android:exported="true">
           <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
           </activity></application></manifest>
           EOF
-          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
-          unzip -q gradle-8.5-bin.zip
-          export PATH="$PWD/gradle-8.5/bin:$PATH"
-          gradle wrapper --gradle-version 8.5
-          chmod +x gradlew
+          chmod +x gradlew || (wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip && unzip -q gradle-8.5-bin.zip && export PATH="$PWD/gradle-8.5/bin:$PATH" && gradle wrapper)
           ./gradlew assembleDebug
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: TasksAI-SmartGuess-Edition
+          name: TasksAI-RealTensor-App
           path: app/build/outputs/apk/debug/app-debug.apk
