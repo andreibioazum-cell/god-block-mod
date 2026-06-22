@@ -1,4 +1,4 @@
-name: TasksAI-Stable-Russian
+name: TasksAI-Stable-Russian-Fixed
 on:
   push:
     branches: [ main ]
@@ -19,7 +19,7 @@ jobs:
       - name: Create Structure
         run: mkdir -p app/src/main/cpp app/src/main/java/com/tasksai app/src/main/res/layout app/src/main/res/values
 
-      - name: Create C++ Core (Russian Support + Stable)
+      - name: Create C++ Core (Fixed Compilation)
         run: |
           cat > app/src/main/cpp/tensor_engine.h << 'EOF'
           #ifndef TENSOR_ENGINE_H
@@ -29,6 +29,7 @@ jobs:
           #include <cmath>
           #include <algorithm>
           #include <ctime>
+          #include <cstdlib>
 
           class TinyBrain {
           public:
@@ -39,39 +40,32 @@ jobs:
               TinyBrain() {
                   srand(time(0));
                   weights.resize(size * size);
-                  // Инициализация Xavier для стабильности
                   float scale = sqrt(1.0f / size);
-                  for(auto& w : weights) w = ((float)rand()/RAND_MAX - 0.5f) * scale;
+                  for(auto& w : weights) {
+                      w = ((float)rand() / (float)RAND_MAX - 0.5f) * scale;
+                  }
               }
 
-              // Обучение: предсказание следующего символа
               float train_step(const std::vector<unsigned char>& sequence) {
                   float total_loss = 0;
+                  if (sequence.size() < 2) return 0;
                   for(size_t t=0; t < sequence.size()-1; t++) {
                       int input_char = sequence[t];
                       int target_char = sequence[t+1];
 
-                      // Forward pass
-                      std::vector<float> pred(size, 0.0f);
                       for(int j=0; j<size; j++) {
-                          pred[j] = weights[input_char * size + j];
-                      }
-
-                      // Backprop (простой градиентный спуск)
-                      for(int j=0; j<size; j++) {
+                          float pred = weights[input_char * size + j];
                           float target_val = (j == target_char) ? 1.0f : 0.0f;
-                          float error = target_val - pred[j];
+                          float error = target_val - pred;
                           total_loss += error * error;
                           
                           float delta = lr * error;
-                          // Clip gradients
-                          if(delta > 0.05f) delta = 0.05f;
-                          if(delta < -0.05f) delta = -0.05f;
-                          
+                          if(delta > 0.1f) delta = 0.1f;
+                          if(delta < -0.1f) delta = -0.1f;
                           weights[input_char * size + j] += delta;
                       }
                   }
-                  return total_loss / sequence.size();
+                  return total_loss / (sequence.size() * size);
               }
 
               std::string generate(std::string seed, int len) {
@@ -82,24 +76,22 @@ jobs:
                   for(int i=0; i<len; i++) {
                       int best_char = 32;
                       float max_score = -1e9;
-                      
-                      // Находим следующий символ с учетом "температуры"
                       for(int j=32; j<255; j++) {
                           float score = weights[last_char * size + j];
-                          float noise = ((float)rand()/RAND_MAX) * 0.2f; // Случайность
+                          float noise = ((float)rand() / (float)RAND_MAX) * 0.1f;
                           if((score + noise) > max_score) {
                               max_score = score + noise;
                               best_char = j;
                           }
                       }
-                      
                       result += (char)best_char;
                       last_char = (unsigned char)best_char;
-                      if(best_char == '\n' || best_char == '.') break;
+                      if(result.length() > 5 && (best_char == '\n' || best_char == '.')) break;
                   }
                   return result;
               }
           };
+          #endif
           EOF
 
           cat > app/src/main/cpp/native-lib.cpp << 'EOF'
@@ -120,7 +112,7 @@ jobs:
           extern "C" JNIEXPORT jstring JNICALL Java_com_tasksai_MLEngine_chat(JNIEnv* env, jobject, jstring text) {
               const char* c = env->GetStringUTFChars(text, nullptr);
               std::string seed(c);
-              std::string res = brain.generate(seed, 100);
+              std::string res = brain.generate(seed, 60);
               env->ReleaseStringUTFChars(text, c);
               return env->NewStringUTF(res.c_str());
           }
@@ -133,30 +125,27 @@ jobs:
           target_link_libraries(tasksai log)
           EOF
 
-      - name: Create UI Layout
+      - name: Create UI and Java
         run: |
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#0D1117">
-              <TextView android:id="@+id/st" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="10dp" android:text="TasksAI Stable v2" android:textColor="#58A6FF" android:gravity="center"/>
-              <ScrollView android:id="@+id/sc" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_above="@+id/controls" android:layout_below="@id/st">
-                  <TextView android:id="@+id/log" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="15dp" android:textColor="#C9D1D9" android:textSize="14sp" android:text="-- Обучите модель на data.txt --\n"/>
+              <TextView android:id="@+id/st" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="10dp" android:text="TasksAI Stable v2.1" android:textColor="#58A6FF" android:gravity="center"/>
+              <ScrollView android:layout_width="match_parent" android:layout_height="match_parent" android:layout_above="@+id/controls" android:layout_below="@id/st">
+                  <TextView android:id="@+id/log" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="15dp" android:textColor="#C9D1D9" android:textSize="14sp" android:text="-- Загрузите data.txt и начните обучение --\n"/>
               </ScrollView>
               <LinearLayout android:id="@+id/controls" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:layout_alignParentBottom="true" android:background="#161B22" android:padding="10dp">
                   <ProgressBar android:id="@+id/pb" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone"/>
                   <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
-                      <EditText android:id="@+id/input" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Ваш вопрос..." android:textColor="#FFF" android:textColorHint="#484F58"/>
-                      <Button android:id="@+id/send" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="->"/>
+                      <EditText android:id="@+id/input" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Написать..." android:textColor="#FFF" android:textColorHint="#484F58"/>
+                      <Button android:id="@+id/send" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text=">"/>
                   </LinearLayout>
                   <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
-                      <Button android:id="@+id/load" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Загрузить TXT"/>
-                      <Button android:id="@+id/train" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Обучить (12 Эпох)" android:enabled="false"/>
+                      <Button android:id="@+id/load" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="FILE"/>
+                      <Button android:id="@+id/train" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="TRAIN" android:enabled="false"/>
                   </LinearLayout>
               </LinearLayout>
           </RelativeLayout>
           EOF
-
-      - name: Create Java Code
-        run: |
           cat > app/src/main/java/com/tasksai/MLEngine.java << 'EOF'
           package com.tasksai;
           public class MLEngine {
@@ -195,17 +184,17 @@ jobs:
                       btnTrain.setEnabled(false); pb.setVisibility(View.VISIBLE);
                       new Thread(() -> {
                           for(int e=1; e<=12; e++) {
-                              float loss = ai.trainBatch(trainingData);
-                              final int epoch = e; final float l = loss;
-                              runOnUiThread(() -> { st.setText("Эпоха: "+epoch+" | Loss: "+l); pb.setProgress(epoch*8); });
+                              final float loss = ai.trainBatch(trainingData);
+                              final int epoch = e;
+                              runOnUiThread(() -> { st.setText("Epoch: "+epoch+" | Loss: "+loss); pb.setProgress(epoch*8); });
                           }
-                          runOnUiThread(() -> { pb.setVisibility(View.GONE); st.setText("Обучение завершено!"); btnTrain.setEnabled(true); });
+                          runOnUiThread(() -> { pb.setVisibility(View.GONE); st.setText("Success!"); btnTrain.setEnabled(true); });
                       }).start();
                   });
 
                   findViewById(R.id.send).setOnClickListener(v -> {
                       String q = input.getText().toString();
-                      log.append("\nВЫ: " + q);
+                      log.append("\nЯ: " + q);
                       String reply = ai.chat(q);
                       log.append("\nИИ: " + reply + "\n");
                       input.setText("");
@@ -218,10 +207,9 @@ jobs:
                       BufferedReader br = new BufferedReader(new InputStreamReader(is));
                       StringBuilder sb = new StringBuilder(); String line;
                       while((line = br.readLine()) != null) sb.append(line).append("\n");
-                      trainingData = sb.toString();
-                      btnTrain.setEnabled(true);
-                      st.setText("Данные загружены: " + trainingData.length() + " симв.");
-                  } catch(Exception e) { st.setText("Ошибка файла"); } }
+                      trainingData = sb.toString(); btnTrain.setEnabled(true);
+                      st.setText("Data: " + trainingData.length() + " chars");
+                  } catch(Exception e) {} }
               }
           }
           EOF
@@ -255,5 +243,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: TasksAI-Stable-App
+          name: TasksAI-Stable-Russian-Fixed
           path: app/build/outputs/apk/debug/app-debug.apk
