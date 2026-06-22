@@ -1,4 +1,4 @@
-name: TasksAI GGML Trainer Pro
+name: TasksAI GGML Chat Pro
 on:
   push:
     branches: [ main ]
@@ -7,9 +7,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,48 +17,73 @@ jobs:
           packages: 'platform-tools build-tools;34.0.0 platforms;android-34 ndk;25.1.8937393 cmake;3.22.1'
 
       - name: Create Structure
-        run: mkdir -p app/src/main/cpp app/src/main/java/com/tasksai app/src/main/res/layout app/src/main/res/drawable app/src/main/res/values
+        run: mkdir -p app/src/main/cpp app/src/main/java/com/tasksai app/src/main/res/layout app/src/main/res/values
 
-      - name: Create C++ Tensor Engine
+      - name: Create Stable C++ Engine
         run: |
           cat > app/src/main/cpp/tensor_engine.h << 'EOF'
           #ifndef TENSOR_ENGINE_H
           #define TENSOR_ENGINE_H
           #include <vector>
-          #include <cmath>
           #include <string>
+          #include <cmath>
           #include <algorithm>
 
-          struct Tensor {
-              std::vector<float> data;
-              int rows, cols;
-              Tensor(int r, int c) : rows(r), cols(c) {
-                  data.resize(r * c);
-                  for(auto& v : data) v = ((float)rand()/RAND_MAX - 0.5f) * 0.1f;
-              }
-          };
-
-          class NeuralNetwork {
+          class TinyBrain {
           public:
-              Tensor weights;
-              float learning_rate = 0.05f;
-              NeuralNetwork() : weights(256, 256) {} // 256 нейронов
+              std::vector<float> weights;
+              int size = 256;
+              float lr = 0.005f; // Маленький шаг, чтобы не было NaN
 
-              float train_step(const std::vector<float>& input) {
-                  std::vector<float> hidden(256, 0.0f);
+              TinyBrain() {
+                  weights.resize(size * size);
+                  for(auto& w : weights) w = ((float)rand()/RAND_MAX - 0.5f) * 0.01f;
+              }
+
+              // Обучение: Пытаемся предсказать следующий байт
+              float train(const std::vector<float>& input, const std::vector<float>& target) {
                   float loss = 0;
-                  // Forward & Simple SGD
-                  for (int j = 0; j < 256; j++) {
-                      for (int i = 0; i < 256; i++) {
-                          hidden[j] += input[i] * weights.data[i * 256 + j];
-                      }
-                      float error = input[j] - hidden[j]; // Пытаемся восстановить вход (Autoencoder style)
+                  for (int j = 0; j < size; j++) {
+                      float pred = 0;
+                      for (int i = 0; i < size; i++) pred += input[i] * weights[i * size + j];
+                      
+                      // Активация Tanh для стабильности
+                      pred = std::tanh(pred);
+                      float error = target[j] - pred;
                       loss += error * error;
-                      for (int i = 0; i < 256; i++) {
-                          weights.data[i * 256 + j] += learning_rate * error * input[i];
+
+                      // Обновление весов с ограничением (Clip gradients)
+                      for (int i = 0; i < size; i++) {
+                          float delta = lr * error * input[i];
+                          if (delta > 0.1f) delta = 0.1f;
+                          if (delta < -0.1f) delta = -0.1f;
+                          weights[i * size + j] += delta;
                       }
                   }
-                  return loss / 256.0f;
+                  return loss / size;
+              }
+
+              // Генерация ответа
+              std::string predict(const std::string& input_text) {
+                  std::vector<float> vec(size, 0.0f);
+                  for(int i=0; i<input_text.length() && i<size; i++) vec[i] = (float)((unsigned char)input_text[i])/255.0f;
+                  
+                  std::string output = "";
+                  for(int step=0; step<50; step++) {
+                      int best_char = 32;
+                      float max_val = -100.0f;
+                      for(int j=32; j<126; j++) { // Ищем символ с макс. вероятностью
+                          float val = 0;
+                          for(int i=0; i<size; i++) val += vec[i] * weights[i * size + j];
+                          if(val > max_val) { max_val = val; best_char = j; }
+                      }
+                      output += (char)best_char;
+                      // Сдвигаем вектор (как в RNN)
+                      for(int i=0; i<size-1; i++) vec[i] = vec[i+1];
+                      vec[size-1] = (float)best_char/255.0f;
+                      if(best_char == '.' || best_char == '!') break;
+                  }
+                  return output;
               }
           };
           #endif
@@ -70,18 +92,28 @@ jobs:
           cat > app/src/main/cpp/native-lib.cpp << 'EOF'
           #include <jni.h>
           #include "tensor_engine.h"
-          #include <string>
 
-          static NeuralNetwork brain;
+          static TinyBrain brain;
 
           extern "C" JNIEXPORT jfloat JNICALL Java_com_tasksai_MLEngine_trainBatch(JNIEnv* env, jobject, jstring text) {
-              const char* c_str = env->GetStringUTFChars(text, nullptr);
-              std::string s(c_str);
-              std::vector<float> vec(256, 0.0f);
-              for(int i=0; i<s.length() && i<256; i++) vec[i] = (float)((unsigned char)s[i]) / 255.0f;
-              float loss = brain.train_step(vec);
-              env->ReleaseStringUTFChars(text, c_str);
+              const char* c = env->GetStringUTFChars(text, nullptr);
+              std::string s(c);
+              std::vector<float> inp(256, 0.0f), tar(256, 0.0f);
+              for(int i=0; i<s.length()-1 && i<254; i++) {
+                  inp[i] = (float)((unsigned char)s[i])/255.0f;
+                  tar[i] = (float)((unsigned char)s[i+1])/255.0f;
+              }
+              float loss = brain.train(inp, tar);
+              env->ReleaseStringUTFChars(text, c);
               return loss;
+          }
+
+          extern "C" JNIEXPORT jstring JNICALL Java_com_tasksai_MLEngine_chat(JNIEnv* env, jobject, jstring text) {
+              const char* c = env->GetStringUTFChars(text, nullptr);
+              std::string input(c);
+              std::string response = brain.predict(input);
+              env->ReleaseStringUTFChars(text, c);
+              return env->NewStringUTF(response.c_str());
           }
           EOF
 
@@ -92,120 +124,102 @@ jobs:
           target_link_libraries(tasksai log)
           EOF
 
-      - name: Create Layout
+      - name: Create UI Layout
         run: |
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" 
-              android:layout_width="match_parent" android:layout_height="match_parent" 
-              android:orientation="vertical" android:padding="16dp" android:background="#0D1117">
-              <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" 
-                  android:text="Status: Waiting for data" android:textColor="#58A6FF" android:textSize="18sp" android:layout_marginBottom="10dp"/>
-              <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal" 
-                  android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="invisible"/>
-              <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:background="#161B22" android:layout_marginVertical="10dp">
-                  <TextView android:id="@+id/log" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="10dp" android:textColor="#C9D1D9" android:fontFamily="monospace" android:text="Engine logs will appear here..."/>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="#0D1117" android:padding="10dp">
+              <TextView android:id="@+id/st" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Status: Idle" android:textColor="#58A6FF"/>
+              <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:background="#161B22" android:layout_margin="5dp">
+                  <TextView android:id="@+id/chat_log" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="10dp" android:textColor="#C9D1D9" android:text="-- System Ready --\n"/>
               </ScrollView>
-              <Button android:id="@+id/btn_load" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="LOAD TEXT FILE" android:backgroundTint="#21262D"/>
-              <Button android:id="@+id/btn_train" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="START 12 EPOCHS TRAINING" android:backgroundTint="#238636" android:enabled="false"/>
+              <ProgressBar android:id="@+id/pb" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone"/>
+              <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                  <EditText android:id="@+id/input" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Talk to AI..." android:textColor="#FFF" android:textColorHint="#484F58"/>
+                  <Button android:id="@+id/btn_send" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SEND"/>
+              </LinearLayout>
+              <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center">
+                  <Button android:id="@+id/btn_load" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="LOAD DATA" android:backgroundTint="#21262D"/>
+                  <Button android:id="@+id/btn_train" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="TRAIN (12 EPOCHS)" android:backgroundTint="#238636" android:enabled="false"/>
+              </LinearLayout>
           </LinearLayout>
           EOF
 
-      - name: Create Java Code (The Brain & File Loader)
+      - name: Create Java MainActivity
         run: |
           cat > app/src/main/java/com/tasksai/MLEngine.java << 'EOF'
           package com.tasksai;
           public class MLEngine {
               static { System.loadLibrary("tasksai"); }
-              public native float trainBatch(String text);
+              public native float trainBatch(String t);
+              public native String chat(String t);
           }
           EOF
           cat > app/src/main/java/com/tasksai/MainActivity.java << 'EOF'
           package com.tasksai;
           import android.app.Activity;
           import android.content.Intent;
-          import android.net.Uri;
           import android.os.Bundle;
           import android.view.View;
           import android.widget.*;
           import java.io.*;
-          import java.util.*;
 
           public class MainActivity extends Activity {
-              MLEngine engine = new MLEngine();
-              TextView status, log;
-              Button btnLoad, btnTrain;
-              ProgressBar progress;
-              String loadedText = "";
+              MLEngine ai = new MLEngine();
+              TextView st, chatLog; EditText input; ProgressBar pb; Button btnTrain;
+              String data = "";
 
               @Override protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   setContentView(R.layout.activity_main);
-                  status = findViewById(R.id.status);
-                  log = findViewById(R.id.log);
-                  btnLoad = findViewById(R.id.btn_load);
-                  btnTrain = findViewById(R.id.btn_train);
-                  progress = findViewById(R.id.progress);
+                  st=findViewById(R.id.st); chatLog=findViewById(R.id.chat_log);
+                  input=findViewById(R.id.input); pb=findViewById(R.id.pb);
+                  btnTrain=findViewById(R.id.btn_train);
 
-                  btnLoad.setOnClickListener(v -> {
-                      Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-                      intent.setType("text/plain");
-                      startActivityForResult(intent, 100);
+                  findViewById(R.id.btn_load).setOnClickListener(v -> {
+                      Intent it = new Intent(Intent.ACTION_GET_CONTENT); it.setType("text/plain");
+                      startActivityForResult(it, 1);
                   });
 
                   btnTrain.setOnClickListener(v -> startTraining());
+
+                  findViewById(R.id.btn_send).setOnClickListener(v -> {
+                      String q = input.getText().toString();
+                      chatLog.append("\nYOU: " + q);
+                      String res = ai.chat(q);
+                      chatLog.append("\nAI: " + res + "\n");
+                      input.setText("");
+                  });
               }
 
-              @Override protected void onActivityResult(int req, int res, Intent data) {
-                  if (req == 100 && data != null) {
-                      try {
-                          Uri uri = data.getData();
-                          InputStream is = getContentResolver().openInputStream(uri);
-                          BufferedReader br = new BufferedReader(new InputStreamReader(is));
-                          StringBuilder sb = new StringBuilder();
-                          String line;
-                          while ((line = br.readLine()) != null) sb.append(line).append(" ");
-                          loadedText = sb.toString();
-                          status.setText("Data loaded: " + loadedText.length() + " chars");
-                          btnTrain.setEnabled(true);
-                          log.append("\nFile loaded successfully.");
-                      } catch (Exception e) { log.append("\nError loading file: " + e.getMessage()); }
-                  }
-              }
-
-              private void startTraining() {
-                  btnTrain.setEnabled(false);
-                  progress.setVisibility(View.VISIBLE);
-                  progress.setMax(12);
-                  
+              void startTraining() {
+                  btnTrain.setEnabled(false); pb.setVisibility(View.VISIBLE); pb.setMax(12);
                   new Thread(() -> {
-                      for (int epoch = 1; epoch <= 12; epoch++) {
-                          final int currentEpoch = epoch;
-                          // Режем текст на куски (batches)
-                          float avgLoss = 0;
-                          int steps = Math.min(loadedText.length() / 256, 100);
-                          for(int i=0; i<steps; i++) {
-                              String batch = loadedText.substring(i*256, (i+1)*256);
-                              avgLoss += engine.trainBatch(batch);
+                      for(int e=1; e<=12; e++) {
+                          float loss = 0;
+                          int chunks = Math.min(data.length()/100, 50);
+                          for(int i=0; i<chunks; i++) {
+                              loss += ai.trainBatch(data.substring(i*100, (i+1)*100));
                           }
-                          final float finalLoss = avgLoss / steps;
-                          runOnUiThread(() -> {
-                              progress.setProgress(currentEpoch);
-                              log.append("\nEpoch " + currentEpoch + "/12 | Loss: " + finalLoss);
-                              status.setText("Training Epoch: " + currentEpoch);
-                          });
-                          try { Thread.sleep(200); } catch (Exception e) {}
+                          final int epoch = e; final float l = loss/chunks;
+                          runOnUiThread(() -> { pb.setProgress(epoch); st.setText("Epoch "+epoch+" Loss: "+l); });
                       }
-                      runOnUiThread(() -> {
-                          status.setText("Training Complete!");
-                          btnTrain.setEnabled(true);
-                          progress.setVisibility(View.INVISIBLE);
-                      });
+                      runOnUiThread(() -> { pb.setVisibility(View.GONE); btnTrain.setEnabled(true); st.setText("Training Finished!"); });
                   }).start();
+              }
+
+              @Override protected void onActivityResult(int req, int res, Intent d) {
+                  if(d != null) { try {
+                      InputStream is = getContentResolver().openInputStream(d.getData());
+                      BufferedReader br = new BufferedReader(new InputStreamReader(is));
+                      StringBuilder sb = new StringBuilder(); String line;
+                      while((line = br.readLine()) != null) sb.append(line).append(" ");
+                      data = sb.toString(); btnTrain.setEnabled(true); st.setText("Data Loaded. Ready to train.");
+                  } catch(Exception e) {} }
               }
           }
           EOF
 
-      - name: Build Project
+      - name: Final Build
         run: |
           echo "include ':app'" > settings.gradle
           cat > build.gradle << 'EOF'
@@ -215,14 +229,14 @@ jobs:
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application' }
           android { namespace 'com.tasksai'; compileSdk 34
-            defaultConfig { applicationId "com.tasksai.ggmlpro"; minSdk 26; targetSdk 34 }
+            defaultConfig { applicationId "com.tasksai.ggmlchat"; minSdk 26; targetSdk 34 }
             externalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } }
           }
           EOF
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-          <application android:label="TasksAI GGML Pro" android:theme="@android:style/Theme.DeviceDefault">
-          <activity android:name=".MainActivity" android:exported="true">
+          <application android:label="TasksAI Chat Pro" android:theme="@android:style/Theme.DeviceDefault">
+          <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
           <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
           </activity></application></manifest>
           EOF
@@ -232,8 +246,8 @@ jobs:
           gradle wrapper --gradle-version 8.5
           ./gradlew assembleDebug
 
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: TasksAI-GGML-Pro
+          name: TasksAI-Chat-Pro
           path: app/build/outputs/apk/debug/app-debug.apk
