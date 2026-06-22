@@ -1,4 +1,4 @@
-name: TasksAI GGML Tensor Engine
+name: TasksAI GGML Trainer Pro
 on:
   push:
     branches: [ main ]
@@ -20,9 +20,9 @@ jobs:
           packages: 'platform-tools build-tools;34.0.0 platforms;android-34 ndk;25.1.8937393 cmake;3.22.1'
 
       - name: Create Structure
-        run: mkdir -p app/src/main/cpp app/src/main/java/com/tasksai app/src/main/res/layout app/src/main/res/values
+        run: mkdir -p app/src/main/cpp app/src/main/java/com/tasksai app/src/main/res/layout app/src/main/res/drawable app/src/main/res/values
 
-      - name: Create Real ML Engine (C++ / Tensor-based)
+      - name: Create C++ Tensor Engine
         run: |
           cat > app/src/main/cpp/tensor_engine.h << 'EOF'
           #ifndef TENSOR_ENGINE_H
@@ -32,58 +32,36 @@ jobs:
           #include <string>
           #include <algorithm>
 
-          // Простейшая структура тензора (как в GGML/PyTorch)
           struct Tensor {
               std::vector<float> data;
-              std::vector<float> grad; // Для обучения
               int rows, cols;
-
               Tensor(int r, int c) : rows(r), cols(c) {
-                  data.resize(r * c, 0.0f);
-                  grad.resize(r * c, 0.0f);
-              }
-
-              // Рандомная инициализация (Xavier)
-              void randomize() {
-                  float scale = sqrt(2.0f / (rows + cols));
-                  for(auto& val : data) val = ((float)rand()/RAND_MAX - 0.5f) * 2.0f * scale;
+                  data.resize(r * c);
+                  for(auto& v : data) v = ((float)rand()/RAND_MAX - 0.5f) * 0.1f;
               }
           };
 
           class NeuralNetwork {
           public:
               Tensor weights;
-              float learning_rate = 0.01f;
+              float learning_rate = 0.05f;
+              NeuralNetwork() : weights(256, 256) {} // 256 нейронов
 
-              NeuralNetwork(int input_size, int output_size) : weights(input_size, output_size) {
-                  weights.randomize();
-              }
-
-              // Forward pass: Matrix Multiplication (Упрощенно)
-              std::vector<float> forward(const std::vector<float>& input) {
-                  std::vector<float> output(weights.cols, 0.0f);
-                  for (int j = 0; j < weights.cols; j++) {
-                      for (int i = 0; i < weights.rows; i++) {
-                          output[j] += input[i] * weights.data[i * weights.cols + j];
+              float train_step(const std::vector<float>& input) {
+                  std::vector<float> hidden(256, 0.0f);
+                  float loss = 0;
+                  // Forward & Simple SGD
+                  for (int j = 0; j < 256; j++) {
+                      for (int i = 0; i < 256; i++) {
+                          hidden[j] += input[i] * weights.data[i * 256 + j];
                       }
-                      output[j] = 1.0f / (1.0f + exp(-output[j])); // Sigmoid activation
-                  }
-                  return output;
-              }
-
-              // Simple Backpropagation (Реальное обучение!)
-              void train(const std::vector<float>& input, const std::vector<float>& target) {
-                  std::vector<float> output = forward(input);
-                  
-                  for (int j = 0; j < weights.cols; j++) {
-                      float error = target[j] - output[j];
-                      float delta = error * output[j] * (1.0f - output[j]); // Derivative
-                      
-                      for (int i = 0; i < weights.rows; i++) {
-                          // Обновление весов (Gradient Descent)
-                          weights.data[i * weights.cols + j] += learning_rate * delta * input[i];
+                      float error = input[j] - hidden[j]; // Пытаемся восстановить вход (Autoencoder style)
+                      loss += error * error;
+                      for (int i = 0; i < 256; i++) {
+                          weights.data[i * 256 + j] += learning_rate * error * input[i];
                       }
                   }
+                  return loss / 256.0f;
               }
           };
           #endif
@@ -92,33 +70,18 @@ jobs:
           cat > app/src/main/cpp/native-lib.cpp << 'EOF'
           #include <jni.h>
           #include "tensor_engine.h"
-          #include <map>
+          #include <string>
 
-          static NeuralNetwork* brain = nullptr;
-          static std::map<std::string, std::vector<float>> vocab;
+          static NeuralNetwork brain;
 
-          extern "C" JNIEXPORT void JNICALL Java_com_tasksai_MLEngine_init(JNIEnv* env, jobject) {
-              if(!brain) brain = new NeuralNetwork(128, 128); // Вход и выход по 128 фичей
-          }
-
-          extern "C" JNIEXPORT jstring JNICALL Java_com_tasksai_MLEngine_process(JNIEnv* env, jobject, jstring text, jboolean is_training) {
+          extern "C" JNIEXPORT jfloat JNICALL Java_com_tasksai_MLEngine_trainBatch(JNIEnv* env, jobject, jstring text) {
               const char* c_str = env->GetStringUTFChars(text, nullptr);
-              std::string input_str(c_str);
-              
-              // 1. Простейшая векторизация (в реальности тут Embedding слой)
-              std::vector<float> vec(128, 0.0f);
-              for(int i=0; i < input_str.length() && i < 128; i++) vec[i] = (float)input_str[i] / 255.0f;
-
-              if(is_training) {
-                  // Обучаем сеть "отзеркаливать" или классифицировать
-                  brain->train(vec, vec); 
-                  env->ReleaseStringUTFChars(text, c_str);
-                  return env->NewStringUTF("Weights updated (Backprop applied)");
-              } else {
-                  std::vector<float> res = brain->forward(vec);
-                  env->ReleaseStringUTFChars(text, c_str);
-                  return env->NewStringUTF("Tensor Forward Pass Complete. Prediction stable.");
-              }
+              std::string s(c_str);
+              std::vector<float> vec(256, 0.0f);
+              for(int i=0; i<s.length() && i<256; i++) vec[i] = (float)((unsigned char)s[i]) / 255.0f;
+              float loss = brain.train_step(vec);
+              env->ReleaseStringUTFChars(text, c_str);
+              return loss;
           }
           EOF
 
@@ -129,41 +92,120 @@ jobs:
           target_link_libraries(tasksai log)
           EOF
 
-      - name: Create UI and Java
+      - name: Create Layout
+        run: |
+          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" 
+              android:layout_width="match_parent" android:layout_height="match_parent" 
+              android:orientation="vertical" android:padding="16dp" android:background="#0D1117">
+              <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" 
+                  android:text="Status: Waiting for data" android:textColor="#58A6FF" android:textSize="18sp" android:layout_marginBottom="10dp"/>
+              <ProgressBar android:id="@+id/progress" style="?android:attr/progressBarStyleHorizontal" 
+                  android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="invisible"/>
+              <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:background="#161B22" android:layout_marginVertical="10dp">
+                  <TextView android:id="@+id/log" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="10dp" android:textColor="#C9D1D9" android:fontFamily="monospace" android:text="Engine logs will appear here..."/>
+              </ScrollView>
+              <Button android:id="@+id/btn_load" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="LOAD TEXT FILE" android:backgroundTint="#21262D"/>
+              <Button android:id="@+id/btn_train" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="START 12 EPOCHS TRAINING" android:backgroundTint="#238636" android:enabled="false"/>
+          </LinearLayout>
+          EOF
+
+      - name: Create Java Code (The Brain & File Loader)
         run: |
           cat > app/src/main/java/com/tasksai/MLEngine.java << 'EOF'
           package com.tasksai;
           public class MLEngine {
               static { System.loadLibrary("tasksai"); }
-              public native void init();
-              public native String process(String text, boolean train);
+              public native float trainBatch(String text);
           }
           EOF
           cat > app/src/main/java/com/tasksai/MainActivity.java << 'EOF'
           package com.tasksai;
           import android.app.Activity;
+          import android.content.Intent;
+          import android.net.Uri;
           import android.os.Bundle;
+          import android.view.View;
           import android.widget.*;
+          import java.io.*;
+          import java.util.*;
+
           public class MainActivity extends Activity {
               MLEngine engine = new MLEngine();
+              TextView status, log;
+              Button btnLoad, btnTrain;
+              ProgressBar progress;
+              String loadedText = "";
+
               @Override protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
-                  LinearLayout root = new LinearLayout(this);
-                  root.setOrientation(LinearLayout.VERTICAL);
-                  TextView tv = new TextView(this); tv.setText("Tensor Engine Ready");
-                  Button btn = new Button(this); btn.setText("Train 1 Epoch");
-                  root.addView(tv); root.addView(btn);
-                  setContentView(root);
-                  engine.init();
-                  btn.setOnClickListener(v -> {
-                      String res = engine.process("Hello Neural World", true);
-                      tv.setText(res);
+                  setContentView(R.layout.activity_main);
+                  status = findViewById(R.id.status);
+                  log = findViewById(R.id.log);
+                  btnLoad = findViewById(R.id.btn_load);
+                  btnTrain = findViewById(R.id.btn_train);
+                  progress = findViewById(R.id.progress);
+
+                  btnLoad.setOnClickListener(v -> {
+                      Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                      intent.setType("text/plain");
+                      startActivityForResult(intent, 100);
                   });
+
+                  btnTrain.setOnClickListener(v -> startTraining());
+              }
+
+              @Override protected void onActivityResult(int req, int res, Intent data) {
+                  if (req == 100 && data != null) {
+                      try {
+                          Uri uri = data.getData();
+                          InputStream is = getContentResolver().openInputStream(uri);
+                          BufferedReader br = new BufferedReader(new InputStreamReader(is));
+                          StringBuilder sb = new StringBuilder();
+                          String line;
+                          while ((line = br.readLine()) != null) sb.append(line).append(" ");
+                          loadedText = sb.toString();
+                          status.setText("Data loaded: " + loadedText.length() + " chars");
+                          btnTrain.setEnabled(true);
+                          log.append("\nFile loaded successfully.");
+                      } catch (Exception e) { log.append("\nError loading file: " + e.getMessage()); }
+                  }
+              }
+
+              private void startTraining() {
+                  btnTrain.setEnabled(false);
+                  progress.setVisibility(View.VISIBLE);
+                  progress.setMax(12);
+                  
+                  new Thread(() -> {
+                      for (int epoch = 1; epoch <= 12; epoch++) {
+                          final int currentEpoch = epoch;
+                          // Режем текст на куски (batches)
+                          float avgLoss = 0;
+                          int steps = Math.min(loadedText.length() / 256, 100);
+                          for(int i=0; i<steps; i++) {
+                              String batch = loadedText.substring(i*256, (i+1)*256);
+                              avgLoss += engine.trainBatch(batch);
+                          }
+                          final float finalLoss = avgLoss / steps;
+                          runOnUiThread(() -> {
+                              progress.setProgress(currentEpoch);
+                              log.append("\nEpoch " + currentEpoch + "/12 | Loss: " + finalLoss);
+                              status.setText("Training Epoch: " + currentEpoch);
+                          });
+                          try { Thread.sleep(200); } catch (Exception e) {}
+                      }
+                      runOnUiThread(() -> {
+                          status.setText("Training Complete!");
+                          btnTrain.setEnabled(true);
+                          progress.setVisibility(View.INVISIBLE);
+                      });
+                  }).start();
               }
           }
           EOF
 
-      - name: Build and Sign
+      - name: Build Project
         run: |
           echo "include ':app'" > settings.gradle
           cat > build.gradle << 'EOF'
@@ -173,22 +215,25 @@ jobs:
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application' }
           android { namespace 'com.tasksai'; compileSdk 34
-            defaultConfig { applicationId "com.tasksai.realml"; minSdk 26; targetSdk 34 }
+            defaultConfig { applicationId "com.tasksai.ggmlpro"; minSdk 26; targetSdk 34 }
             externalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } }
           }
           EOF
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-          <application android:label="TasksAI Tensor" android:theme="@android:style/Theme.DeviceDefault">
+          <application android:label="TasksAI GGML Pro" android:theme="@android:style/Theme.DeviceDefault">
           <activity android:name=".MainActivity" android:exported="true">
           <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
           </activity></application></manifest>
           EOF
-          chmod +x gradlew || (wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip && unzip -q gradle-8.5-bin.zip && export PATH="$PWD/gradle-8.5/bin:$PATH" && gradle wrapper)
+          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
+          unzip -q gradle-8.5-bin.zip
+          export PATH="$PWD/gradle-8.5/bin:$PATH"
+          gradle wrapper --gradle-version 8.5
           ./gradlew assembleDebug
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TasksAI-RealTensor-App
+          name: TasksAI-GGML-Pro
           path: app/build/outputs/apk/debug/app-debug.apk
