@@ -1,4 +1,4 @@
-name: TasksAI OmniTransformer (GPT Architecture)
+name: TasksAI OmniTransformer Pro
 on:
   push:
     branches: [ main ]
@@ -22,7 +22,7 @@ jobs:
       - name: Create Folders
         run: mkdir -p app/src/main/cpp app/src/main/java/com/aetherai app/src/main/res/layout app/src/main/res/drawable app/src/main/res/values
 
-      - name: Create C++ Core (GPT-style Transformer Engine)
+      - name: Create C++ Core (Fixed GPT Engine)
         run: |
           cat > app/src/main/cpp/ggml_core.h << 'EOF'
           #ifndef GGML_CORE_H
@@ -33,6 +33,8 @@ jobs:
           #include <cmath>
           #include <algorithm>
           #include <random>
+          #include <sstream>
+          #include <iostream>
 
           class GPTCore {
           public:
@@ -40,7 +42,7 @@ jobs:
               std::vector<std::string> id_to_word;
               std::vector<int> stream;
               std::mt19937 gen;
-              float temperature = 0.8f; // Контроль креативности
+              float temperature = 0.7f;
 
               GPTCore() : gen(std::random_device{}()) {}
 
@@ -57,69 +59,57 @@ jobs:
                   while(ss >> w) stream.push_back(get_id(w));
               }
 
-              // МЕХАНИЗМ ВНИМАНИЯ (ATTENTION) + NEXT TOKEN PREDICTION
-              std::string generate(std::string query, int length = 150) {
-                  if (stream.size() < 10) return "Not enough data to form thoughts.";
+              std::string generate(std::string query, int length = 200) {
+                  if (stream.size() < 5) return "Error: Knowledge base empty. Please train me.";
 
                   std::vector<int> context;
                   std::stringstream ss(query); std::string w;
                   while(ss >> w) context.push_back(get_id(w));
 
                   std::string output = "";
-                  
                   for (int t = 0; t < length; t++) {
                       std::map<int, float> logits;
                       
-                      // Анализируем разные размеры контекста (аналог слоев внимания)
-                      for (int window = 1; window <= 3; window++) {
-                          if (context.size() < window) continue;
-                          
-                          for (size_t i = window; i < stream.size() - 1; i++) {
+                      // Attention simulation (multi-window)
+                      for (int win = 1; win <= 3; win++) {
+                          if (context.size() < (size_t)win) continue;
+                          for (size_t i = win; i < stream.size() - 1; i++) {
                               bool match = true;
-                              for (int j = 0; j < window; j++) {
-                                  if (stream[i - window + j] != context[context.size() - window + j]) {
+                              for (int j = 0; j < win; j++) {
+                                  if (stream[i - win + j] != context[context.size() - win + j]) {
                                       match = false; break;
                                   }
                               }
-                              if (match) {
-                                  // Чем длиннее совпавший контекст, тем выше вес токена
-                                  logits[stream[i]] += (float)window * 2.0f;
-                              }
+                              if (match) logits[stream[i]] += (float)win * 5.0f;
                           }
                       }
 
                       if (logits.empty()) {
-                          // "Галлюцинация": если контекст не найден, выбираем ассоциативно
                           int fallback = stream[gen() % (stream.size()-1)];
                           logits[fallback] = 1.0f;
                       }
 
-                      // ПРИМЕНЕНИЕ ТЕМПЕРАТУРЫ (Softmax-симуляция)
                       std::vector<std::pair<int, float>> candidates;
                       float total_prob = 0;
-                      for (auto const& [id, weight] : logits) {
-                          float prob = std::pow(weight, 1.0f / temperature);
-                          candidates.push_back({id, prob});
-                          total_prob += prob;
+                      for (auto const& item : logits) {
+                          float p = std::pow(item.second, 1.0f / temperature);
+                          candidates.push_back({item.first, p});
+                          total_prob += p;
                       }
 
-                      // Сэмплирование (случайный выбор из вероятностей)
                       std::uniform_real_distribution<float> dist(0, total_prob);
                       float roll = dist(gen);
-                      int next_id = -1;
+                      int next_id = candidates[0].first;
                       for (auto const& cand : candidates) {
                           roll -= cand.second;
                           if (roll <= 0) { next_id = cand.first; break; }
                       }
 
-                      if (next_id == -1) next_id = candidates[0].first;
-                      
                       std::string word = id_to_word[next_id];
-                      if (word == "u:") break; // Стоп-токен
-                      
+                      if (word == "u:") break; 
                       output += word + " ";
                       context.push_back(next_id);
-                      if (context.size() > 5) context.erase(context.begin()); // Окно памяти
+                      if (context.size() > 10) context.erase(context.begin());
                   }
                   return output;
               }
@@ -151,11 +141,12 @@ jobs:
           cat > app/src/main/cpp/CMakeLists.txt << 'EOF'
           cmake_minimum_required(VERSION 3.22)
           project(aetherai)
+          set(CMAKE_CXX_STANDARD 17)
           add_library(aetherai SHARED aetherai_jni.cpp)
           target_link_libraries(aetherai log)
           EOF
 
-      - name: Create Java MainActivity (Modern Chat UI)
+      - name: Create Java UI (Thinking + Data Parser)
         run: |
           cat > app/src/main/java/com/aetherai/AIEngine.java << 'EOF'
           package com.aetherai;
@@ -169,48 +160,64 @@ jobs:
           import android.view.*;
           import android.widget.*;
           import android.content.Intent;
-          import android.graphics.Color;
+          import android.graphics.Typeface;
           import java.io.*;
 
           public class MainActivity extends Activity {
           AIEngine ai = new AIEngine(); LinearLayout chat; EditText input; ScrollView scroll;
-          
           @Override protected void onCreate(Bundle savedInstanceState) {
-          super.onCreate(savedInstanceState);
-          setContentView(createUI());
-          }
+          super.onCreate(savedInstanceState); setContentView(createUI()); }
 
           private View createUI() {
               LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(0xFF0D1117);
-              
-              Toolbar tb = new Toolbar(this); tb.setTitle("TasksAI OmniGPT"); tb.setTitleTextColor(-1); tb.setBackgroundColor(0xFF161B22);
-              root.addView(tb);
-
-              scroll = new ScrollView(this); chat = new LinearLayout(this); chat.setOrientation(LinearLayout.VERTICAL); chat.setPadding(30,30,30,30);
-              scroll.addView(chat);
-              root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-              
-              LinearLayout controls = new LinearLayout(this); controls.setPadding(20,20,20,20);
-              Button btnData = new Button(this); btnData.setText("TRAIN"); btnData.setOnClickListener(v -> {
+              LinearLayout h = new LinearLayout(this); h.setPadding(30,30,30,30); h.setBackgroundColor(0xFF161B22);
+              TextView t = new TextView(this); t.setText("TasksAI GPT"); t.setTextColor(0xFF58A6FF); t.setTypeface(null, Typeface.BOLD);
+              Button bL = new Button(this); bL.setText("DATA"); bL.setOnClickListener(v -> {
                   Intent it = new Intent(Intent.ACTION_GET_CONTENT); it.setType("text/plain"); startActivityForResult(it, 1);
               });
-              input = new EditText(this); input.setHint("Type a message..."); input.setTextColor(-1);
-              Button btnSend = new Button(this); btnSend.setText("GO"); btnSend.setOnClickListener(v -> {
-                  String q = input.getText().toString(); if(q.isEmpty()) return;
-                  addBubble("You", q, 0xFF21262D);
-                  new Thread(() -> {
-                      String res = ai.generate(q);
-                      ai.addText("u: " + q + " a: " + res); // Обучение в реальном времени
-                      runOnUiThread(() -> addBubble("AI", res, 0xFF161B22));
-                  }).start();
-                  input.setText("");
-              });
-              controls.addView(btnData); controls.addView(input, new LinearLayout.LayoutParams(0, -2, 1)); controls.addView(btnSend);
-              root.addView(controls); return root;
+              h.addView(t, new LinearLayout.LayoutParams(0,-2,1)); h.addView(bL); root.addView(h);
+              scroll = new ScrollView(this); chat = new LinearLayout(this); chat.setOrientation(LinearLayout.VERTICAL); chat.setPadding(20,20,20,20);
+              scroll.addView(chat); root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+              LinearLayout b = new LinearLayout(this); b.setPadding(20,20,20,20);
+              input = new EditText(this); input.setHint("Write something..."); input.setTextColor(-1);
+              Button s = new Button(this); s.setText("RUN"); s.setOnClickListener(v -> sendMessage());
+              b.addView(input, new LinearLayout.LayoutParams(0,-2,1)); b.addView(s); root.addView(b);
+              return root;
           }
 
-          private void addBubble(String user, String text, int color) {
-              TextView tv = new TextView(this); tv.setText(user + ":\n" + text); tv.setTextColor(-1);
+          private void sendMessage() {
+              String q = input.getText().toString(); if(q.isEmpty()) return;
+              addBubble("YOU", q, 0xFF21262D, false);
+              input.setText("");
+              new Thread(() -> {
+                  String res = ai.generate(q);
+                  ai.addText("u: " + q + " a: " + res);
+                  runOnUiThread(() -> parseAIResponse(res));
+              }).start();
+          }
+
+          private void parseAIResponse(String raw) {
+              String thought = ""; String answer = raw;
+              if (raw.contains("<thought>")) {
+                  try {
+                      int start = raw.indexOf("<thought>") + 9;
+                      int end = raw.indexOf("</thought>");
+                      if(end > start) {
+                          thought = raw.substring(start, end);
+                          answer = raw.substring(end + 10);
+                      }
+                  } catch(Exception e) {}
+              }
+              if (!thought.isEmpty()) {
+                  TextView tv = new TextView(this); tv.setText("Thinking: " + thought.trim());
+                  tv.setTextColor(0xFF8B949E); tv.setTextSize(12); tv.setTypeface(null, Typeface.ITALIC);
+                  chat.addView(tv);
+              }
+              addBubble("AI", answer.replace("a:", "").trim(), 0xFF161B22, true);
+          }
+
+          private void addBubble(String u, String t, int color, boolean aiB) {
+              TextView tv = new TextView(this); tv.setText(t); tv.setTextColor(-1);
               tv.setPadding(30,30,30,30);
               LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.setMargins(0,10,0,10);
               tv.setLayoutParams(lp); tv.setBackgroundColor(color);
@@ -241,7 +248,7 @@ jobs:
           EOF
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-          <application android:label="OmniGPT" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+          <application android:label="TasksAI GPT" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
           <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
           <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
           </activity></application></manifest>
@@ -256,5 +263,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: TasksAI-OmniGPT-Pro
+          name: TasksAI-GPT-Professional
           path: app/build/outputs/apk/debug/app-debug.apk
