@@ -1,4 +1,4 @@
-name: TasksAI Smart Guess Pro (Transformer Edition)
+name: TasksAI Smart Guess Pro
 on:
   push:
     branches: [ main ]
@@ -22,7 +22,7 @@ jobs:
       - name: Create Folders
         run: mkdir -p app/src/main/cpp app/src/main/java/com/aetherai app/src/main/res/layout app/src/main/res/drawable app/src/main/res/values
 
-      - name: Create C++ Core (Neural Transformer Engine)
+      - name: Create C++ Core (Memory & Thought Engine)
         run: |
           cat > app/src/main/cpp/ggml_core.h << 'EOF'
           #ifndef GGML_CORE_H
@@ -30,7 +30,6 @@ jobs:
           #include <vector>
           #include <string>
           #include <map>
-          #include <cmath>
           #include <algorithm>
           #include <random>
 
@@ -51,49 +50,56 @@ jobs:
                   return id;
               }
 
-              // Умный поиск ID (fuzzy matching)
               int find_closest_id(std::string unknown_word) {
                   if (vocab.count(unknown_word)) return vocab[unknown_word];
                   int best_id = 0; float max_sim = -1.0f;
                   for(int i=0; i < (int)id_to_word.size(); i++) {
                       float sim = 0;
                       for(char c : unknown_word) if(id_to_word[i].find(c) != std::string::npos) sim++;
-                      sim /= (float)(unknown_word.length() + id_to_word[i].length());
+                      sim /= (float)(unknown_word.length() + id_to_word[i].length() + 1);
                       if(sim > max_sim) { max_sim = sim; best_id = i; }
                   }
                   return best_id;
               }
 
+              // Добавление в память (обучение на лету)
+              void remember(std::string text) {
+                  std::stringstream ss(text); std::string w;
+                  while(ss >> w) stream.push_back(get_id(w));
+              }
+
               std::string inference(const std::vector<int>& query) {
-                  if (stream.empty()) return "Система пуста. Загрузите датасет (JSONL/TXT).";
+                  if (stream.size() < 10) return "Ошибка: Мало данных для мышления.";
                   
-                  // СИМУЛЯЦИЯ ATTENTION (ПОИСК КОНТЕКСТНОГО ОКНА)
                   int best_pos = -1;
                   float max_score = -1.0f;
 
-                  for (size_t i = 0; i < stream.size() - query.size(); i++) {
-                      float current_score = 0;
-                      for (size_t j = 0; j < query.size(); j++) {
-                          if (stream[i + j] == query[j]) current_score += 1.0f;
-                      }
-                      // Добавляем случайность (Температура)
-                      current_score += (float)(gen() % 100) / 500.0f; 
+                  // Ищем наиболее подходящий контекст в памяти (включая историю чата)
+                  for (size_t i = 0; i < stream.size() - 5; i++) {
+                      if (id_to_word[stream[i]] == "u:") {
+                          float current_score = 0;
+                          for (size_t j = i + 1; j < i + 20 && j < stream.size(); j++) {
+                              for (int q_token : query) if (stream[j] == q_token) current_score += 1.0f;
+                          }
+                          // Температурный коэффициент (разные ответы)
+                          current_score += (float)(gen() % 100) / 250.0f;
 
-                      if (current_score > max_score) {
-                          max_score = current_score;
-                          best_pos = (int)i;
+                          if (current_score > max_score) {
+                              max_score = current_score;
+                              best_pos = (int)i;
+                          }
                       }
                   }
 
-                  if (best_pos == -1) return "Я не нашел похожих структур в памяти.";
+                  if (best_pos == -1) best_pos = gen() % (stream.size() / 2);
 
-                  // ГЕНЕРАЦИЯ ОТВЕТА (ПРОДОЛЖЕНИЕ ПОСЛЕДОВАТЕЛЬНОСТИ)
+                  // Собираем всё от найденного u: до следующего u:
                   std::string res = "";
-                  int start_idx = best_pos + query.size();
-                  for (size_t i = start_idx; i < start_idx + 300 && i < stream.size(); i++) {
+                  bool start_collecting = false;
+                  for (size_t i = best_pos; i < best_pos + 500 && i < stream.size(); i++) {
                       std::string w = id_to_word[stream[i]];
-                      if (w == "u:" || w == "{" || w == "}") break; 
-                      res += w + " ";
+                      if (w == "u:" && i > (size_t)best_pos + 2) break;
+                      if (i > (size_t)best_pos) res += w + " ";
                   }
                   return res;
               }
@@ -106,18 +112,13 @@ jobs:
           #include <string>
           #include <vector>
           #include <sstream>
-          #include <algorithm>
           #include "ggml_core.h"
 
           static OmniEngine engine;
 
           extern "C" JNIEXPORT void JNICALL Java_com_aetherai_AIEngine_addText(JNIEnv* env, jobject, jstring text) {
               const char* c = env->GetStringUTFChars(text, nullptr);
-              std::stringstream ss(c); std::string w;
-              while(ss >> w) {
-                  // Сохраняем регистр для кода
-                  engine.stream.push_back(engine.get_id(w));
-              }
+              engine.remember(c);
               env->ReleaseStringUTFChars(text, c);
           }
 
@@ -143,70 +144,108 @@ jobs:
           target_link_libraries(aetherai log)
           EOF
 
-      - name: Create Java UI (Multi-File Training)
+      - name: Create Layout & UI
+        run: |
+          cat > app/src/main/res/drawable/bubble_ai.xml << 'EOF'
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#161B22"/><corners android:radius="12dp"/><stroke android:width="1dp" android:color="#30363D"/></shape>
+          EOF
+          cat > app/src/main/res/drawable/bubble_user.xml << 'EOF'
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#21262D"/><corners android:radius="12dp"/></shape>
+          EOF
+
+      - name: Create Java MainActivity (Ultimate Thought Parser)
         run: |
           cat > app/src/main/java/com/aetherai/AIEngine.java << 'EOF'
           package com.aetherai;
           public class AIEngine { static { System.loadLibrary("aetherai"); }
-          public native void addText(String t); public native int getTokens();
-          public native String generate(String input); }
+          public native void addText(String t); public native int getTokens(); public native String generate(String input); }
           EOF
-          
           cat > app/src/main/java/com/aetherai/MainActivity.java << 'EOF'
           package com.aetherai;
           import android.app.Activity;
-          import android.content.ClipData;
-          import android.content.Intent;
           import android.os.Bundle;
-          import android.view.*;
+          import android.view.Gravity;
+          import android.view.View;
           import android.widget.*;
+          import android.content.Intent;
+          import android.graphics.Typeface;
           import java.io.*;
 
           public class MainActivity extends Activity {
           AIEngine ai = new AIEngine(); LinearLayout chat; EditText input; TextView st; ScrollView scroll;
+          
           @Override protected void onCreate(Bundle savedInstanceState) {
           super.onCreate(savedInstanceState);
           setContentView(createUI());
-          new Thread(() -> { /* Warmup */ }).start(); }
-
-          private View createUI() {
-              LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(0xFF0D1117);
-              LinearLayout h = new LinearLayout(this); h.setPadding(20,20,20,20); h.setBackgroundColor(0xFF161B22);
-              st = new TextView(this); st.setText("TasksAI: 0 tokens"); st.setTextColor(0xFF58A6FF);
-              Button bL = new Button(this); bL.setText("FILES"); bL.setOnClickListener(v -> {
-                  Intent it = new Intent(Intent.ACTION_GET_CONTENT); it.setType("*/*"); it.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true); startActivityForResult(it, 1);
-              });
-              h.addView(st); h.addView(bL); root.addView(h);
-              scroll = new ScrollView(this); chat = new LinearLayout(this); chat.setOrientation(LinearLayout.VERTICAL);
-              scroll.addView(chat); root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-              LinearLayout b = new LinearLayout(this); input = new EditText(this); input.setHint("Ask or Command...");
-              input.setTextColor(-1); b.addView(input, new LinearLayout.LayoutParams(0, -2, 1));
-              Button s = new Button(this); s.setText("RUN"); s.setOnClickListener(v -> {
-                  String q = input.getText().toString(); addM("User", q);
-                  new Thread(() -> { String res = ai.generate(q); runOnUiThread(() -> addM("AI", res)); }).start();
-                  input.setText("");
-              });
-              b.addView(s); root.addView(b); return root;
           }
 
-          private void addM(String u, String t) {
-              TextView tv = new TextView(this); tv.setText(u + ": " + t); tv.setTextColor(u.equals("AI") ? 0xFFC9D1D9 : 0xFF79C0FF);
-              tv.setPadding(20,10,20,10); chat.addView(tv); scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+          private View createUI() {
+              RelativeLayout root = new RelativeLayout(this); root.setBackgroundColor(0xFF0D1117);
+              LinearLayout h = new LinearLayout(this); h.setId(View.generateViewId()); h.setPadding(30,30,30,30); h.setBackgroundColor(0xFF161B22);
+              st = new TextView(this); st.setText("TasksAI SmartGuess Pro"); st.setTextColor(0xFF58A6FF); st.setTypeface(null, Typeface.BOLD);
+              Button bL = new Button(this); bL.setText("DATA"); bL.setOnClickListener(v -> {
+                  Intent it = new Intent(Intent.ACTION_GET_CONTENT); it.setType("text/plain"); startActivityForResult(it, 1);
+              });
+              h.addView(st, new LinearLayout.LayoutParams(0, -2, 1)); h.addView(bL);
+              
+              scroll = new ScrollView(this); scroll.setId(View.generateViewId());
+              chat = new LinearLayout(this); chat.setOrientation(LinearLayout.VERTICAL); chat.setPadding(20,20,20,20);
+              scroll.addView(chat);
+              
+              LinearLayout b = new LinearLayout(this); b.setId(View.generateViewId()); b.setPadding(20,20,20,20); b.setBackgroundColor(0xFF0D1117);
+              input = new EditText(this); input.setHint("Напиши ИИ..."); input.setTextColor(-1); input.setHintTextColor(0xFF484F58);
+              ImageButton s = new ImageButton(this); s.setImageResource(android.R.drawable.ic_menu_send); s.setOnClickListener(v -> sendMessage());
+              b.addView(input, new LinearLayout.LayoutParams(0, -2, 1)); b.addView(s);
+
+              RelativeLayout.LayoutParams lp1 = new RelativeLayout.LayoutParams(-1, -2); lp1.addRule(RelativeLayout.ALIGN_PARENT_TOP);
+              RelativeLayout.LayoutParams lp3 = new RelativeLayout.LayoutParams(-1, -2); lp3.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+              RelativeLayout.LayoutParams lp2 = new RelativeLayout.LayoutParams(-1, -1); lp2.addRule(RelativeLayout.BELOW, h.getId()); lp2.addRule(RelativeLayout.ABOVE, b.getId());
+              
+              root.addView(h, lp1); root.addView(b, lp3); root.addView(scroll, lp2);
+              return root;
+          }
+
+          private void sendMessage() {
+              String q = input.getText().toString(); if(q.isEmpty()) return;
+              addMsg("YOU", q, true);
+              input.setText("");
+              new Thread(() -> {
+                  String rawResponse = ai.generate(q);
+                  // ЗАПОМИНАЕМ ИСТОРИЮ (В память ИИ)
+                  ai.addText("u: " + q + " " + rawResponse);
+                  runOnUiThread(() -> parseAndAddAI(rawResponse));
+              }).start();
+          }
+
+          private void parseAndAddAI(String t) {
+              String thought = ""; String answer = t;
+              if (t.contains("<thought>") && t.contains("</thought>")) {
+                  thought = t.substring(t.indexOf("<thought>")+9, t.indexOf("</thought>"));
+                  answer = t.substring(t.indexOf("</thought>")+10);
+              }
+              if (!thought.isEmpty()) {
+                  TextView tvT = new TextView(this); tvT.setText("● Thinking: " + thought.trim());
+                  tvT.setTextColor(0xFF8B949E); tvT.setTextSize(12); tvT.setTypeface(null, Typeface.ITALIC);
+                  tvT.setPadding(40, 10, 40, 10); chat.addView(tvT);
+              }
+              addMsg("AI", answer.replace("a:", "").trim(), false);
+          }
+
+          private void addMsg(String u, String t, boolean isUser) {
+              TextView tv = new TextView(this); tv.setText(t); tv.setTextColor(0xFFC9D1D9); tv.setPadding(35, 25, 35, 25);
+              LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+              lp.gravity = isUser ? Gravity.END : Gravity.START; lp.setMargins(0, 15, 0, 15);
+              tv.setLayoutParams(lp); tv.setBackgroundResource(isUser ? R.drawable.bubble_user : R.drawable.bubble_ai);
+              chat.addView(tv); scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
           }
 
           @Override protected void onActivityResult(int req, int res, Intent d) {
-              if (d != null) { new Thread(() -> { try {
-                  if (d.getClipData() != null) {
-                      ClipData cd = d.getClipData();
-                      for (int i=0; i<cd.getItemCount(); i++) load(cd.getItemAt(i).getUri());
-                  } else load(d.getData());
-                  runOnUiThread(() -> st.setText("Knowledge: " + ai.getTokens() + " tokens"));
+              if (d != null && d.getData() != null) { new Thread(() -> { try {
+                  InputStream is = getContentResolver().openInputStream(d.getData());
+                  BufferedReader br = new BufferedReader(new InputStreamReader(is));
+                  String l; while ((l = br.readLine()) != null) ai.addText(l + " ");
+                  runOnUiThread(() -> st.setText("Knowledge: " + ai.getTokens() + " tkn"));
               } catch (Exception e) {} }).start(); }
-          }
-          private void load(android.net.Uri u) throws Exception {
-              InputStream is = getContentResolver().openInputStream(u);
-              BufferedReader br = new BufferedReader(new InputStreamReader(is));
-              String l; while ((l = br.readLine()) != null) ai.addText(l + " ");
           } }
           EOF
 
@@ -220,12 +259,12 @@ jobs:
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application' }
           android { namespace 'com.aetherai'; compileSdk 34
-          defaultConfig { applicationId "com.tasksai.transformer"; minSdk 26; targetSdk 34; ndk { abiFilters 'arm64-v8a' } }
+          defaultConfig { applicationId "com.tasksai.guess"; minSdk 26; targetSdk 34; ndk { abiFilters 'arm64-v8a' } }
           externalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } } }
           EOF
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-          <application android:label="TasksAI Transformer" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+          <application android:label="DeepSeek Guess" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
           <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
           <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
           </activity></application></manifest>
@@ -240,5 +279,5 @@ jobs:
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: TasksAI-Transformer-Pro
+          name: TasksAI-SmartGuess-Pro
           path: app/build/outputs/apk/debug/app-debug.apk
