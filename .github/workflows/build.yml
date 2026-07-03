@@ -12,55 +12,46 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Prepare Folders and Library
+      - name: Setup Android Project Structure
         run: |
-          # Полная очистка корня
-          find . -maxdepth 1 ! -name '.github' ! -name '.' -exec rm -rf {} +
+          # БЕЗОПАСНАЯ ОЧИСТКА (сохраняем .git и .github)
+          find . -maxdepth 1 ! -name '.github' ! -name '.git' ! -name '.' -exec rm -rf {} +
           
-          # Создание структуры папок Android
+          # Создание структуры
           mkdir -p app/src/main/java/com/tasksai/neural
           mkdir -p app/src/main/cpp
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
 
-          # Скачивание Eigen (ИИ движок)
+      - name: Download Eigen (AI Library)
+        run: |
           wget -q https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
           tar -xzf eigen-3.4.0.tar.gz
           mv eigen-3.4.0 app/src/main/cpp/eigen
           rm eigen-3.4.0.tar.gz
 
-      - name: Create C++ Neural Core (JNI)
+      - name: Create C++ Neural Core
         run: |
           cat > app/src/main/cpp/native-lib.cpp << 'EOF'
           #include <jni.h>
           #include <string>
           #include <Eigen/Dense>
-          #include <vector>
 
           using namespace Eigen;
 
-          // Простая нейронная сеть на Eigen
-          class NeuralBrain {
-          public:
-              MatrixXf weights;
-              NeuralBrain() {
-                  weights = MatrixXf::Random(1, 1); // 1 вход -> 1 выход
-              }
-              float process(float input) {
-                  MatrixXf in(1,1); in(0,0) = input;
-                  MatrixXf out = in * weights;
-                  return out(0,0);
-              }
-          };
-
-          static NeuralBrain brain;
-
           extern "C" JNIEXPORT jstring JNICALL
           Java_com_tasksai_neural_MainActivity_processWithAI(JNIEnv* env, jobject, jfloat val) {
-              float result = brain.process(val);
-              std::string response = "Нейросеть предсказала: " + std::to_string(result);
-              return env->NewStringUTF(response.c_str());
+              // Реальный матричный расчет нейроном
+              MatrixXf weights = MatrixXf::Random(1, 1);
+              MatrixXf input(1, 1);
+              input(0, 0) = val;
+              MatrixXf output = input * weights;
+              
+              std::string res = "AI Output: " + std::to_string(output(0,0));
+              return env->NewStringUTF(res.c_str());
           }
           EOF
 
@@ -72,14 +63,14 @@ jobs:
           target_link_libraries(native-lib log)
           EOF
 
-      - name: Create Java UI
+      - name: Create Java UI (MainActivity)
         run: |
           cat > app/src/main/java/com/tasksai/neural/MainActivity.java << 'EOF'
           package com.tasksai.neural;
           import android.app.Activity;
           import android.os.Bundle;
+          import android.view.Gravity;
           import android.widget.*;
-          import android.view.View;
           import android.graphics.Color;
 
           public class MainActivity extends Activity {
@@ -90,59 +81,53 @@ jobs:
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   
-                  LinearLayout layout = new LinearLayout(this);
-                  layout.setOrientation(LinearLayout.VERTICAL);
-                  layout.setPadding(50, 50, 50, 50);
-                  layout.setBackgroundColor(Color.parseColor("#0D1117"));
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(60, 100, 60, 60);
+                  root.setBackgroundColor(0xFF0D1117);
+                  root.setGravity(Gravity.CENTER_HORIZONTAL);
 
-                  TextView title = new TextView(this);
-                  title.setText("TasksAI: Neural Brain");
-                  title.setTextSize(24);
-                  title.setTextColor(Color.parseColor("#58A6FF"));
-                  layout.addView(title);
+                  TextView tv = new TextView(this);
+                  tv.setText("TasksAI Smart Guess");
+                  tv.setTextColor(0xFF58A6FF);
+                  tv.setTextSize(28);
+                  root.addView(tv);
 
-                  EditText input = new EditText(this);
-                  input.setHint("Введите число для анализа...");
-                  input.setTextColor(Color.WHITE);
-                  input.setHintTextColor(Color.GRAY);
-                  layout.addView(input);
+                  EditText ed = new EditText(this);
+                  ed.setHint("Input value...");
+                  ed.setHintTextColor(0xFF484F58);
+                  ed.setTextColor(Color.WHITE);
+                  root.addView(ed);
 
                   Button btn = new Button(this);
-                  btn.setText("ЗАПУСТИТЬ НЕЙРОСЕТЬ");
-                  btn.setBackgroundColor(Color.parseColor("#238636"));
-                  btn.setTextColor(Color.WHITE);
-                  layout.addView(btn);
+                  btn.setText("THINK WITH NEURAL CORE");
+                  btn.setPadding(0, 40, 0, 40);
+                  root.addView(btn);
 
-                  TextView result = new TextView(this);
-                  result.setPadding(0, 50, 0, 0);
-                  result.setTextColor(Color.parseColor("#C9D1D9"));
-                  layout.addView(result);
+                  TextView out = new TextView(this);
+                  out.setTextColor(0xFFC9D1D9);
+                  out.setPadding(0, 50, 0, 0);
+                  root.addView(out);
 
                   btn.setOnClickListener(v -> {
                       try {
-                          float val = Float.parseFloat(input.getText().toString());
-                          result.setText(processWithAI(val));
-                      } catch (Exception e) {
-                          result.setText("Ошибка: введите число");
-                      }
+                          float vIn = Float.parseFloat(ed.getText().toString());
+                          out.setText(processWithAI(vIn));
+                      } catch(Exception e) { out.setText("Enter valid number"); }
                   });
 
-                  setContentView(layout);
+                  setContentView(root);
               }
           }
           EOF
 
-      - name: Create Gradle Infrastructure
+      - name: Configure Gradle
         run: |
+          echo "include ':app'" > settings.gradle
           cat > build.gradle << 'EOF'
           buildscript { repositories { google(); mavenCentral() }; dependencies { classpath 'com.android.tools.build:gradle:8.2.2' } }
           allprojects { repositories { google(); mavenCentral() } }
           EOF
-
-          cat > settings.gradle << 'EOF'
-          include ':app'
-          EOF
-
           cat > app/build.gradle << 'EOF'
           plugins { id 'com.android.application' }
           android {
@@ -157,11 +142,10 @@ jobs:
               externalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } }
           }
           EOF
-
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <application android:label="TasksAI Neural" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true">
+                  <activity android:name="com.tasksai.neural.MainActivity" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -171,12 +155,12 @@ jobs:
           </manifest>
           EOF
 
-      - name: Commit Files
+      - name: Commit and Push Files
         run: |
           git config --global user.name "TasksAIBot"
           git config --global user.email "bot@tasksai.com"
           git add .
-          git commit -m "Hybrid Java UI + C++ Eigen Core"
+          git commit -m "Fix: Full Neural Project with Java UI" || echo "No changes"
           git push origin main --force
 
       - name: Build APK
@@ -186,8 +170,8 @@ jobs:
           export PATH="$PWD/gradle-8.5/bin:$PATH"
           gradle assembleDebug
 
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: TasksAI-Neural-Hybrid-APK
+          name: TasksAI-Final-Hybrid
           path: app/build/outputs/apk/debug/*.apk
