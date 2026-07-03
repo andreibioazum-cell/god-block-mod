@@ -1,0 +1,12 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.tasksai.neural'
+    compileSdk 34
+    defaultConfig {
+        applicationId "com.tasksai.neural"
+        minSdk 26
+        targetSdk 34
+        externalNativeBuild { cmake { cppFlags "" } }
+    }
+    externalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } }
+}

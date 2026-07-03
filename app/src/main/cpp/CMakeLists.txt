@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.22)
+project(neural_core)
+include_directories(eigen)
+add_library(native-lib SHARED native-lib.cpp)
+target_link_libraries(native-lib log)
